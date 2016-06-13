@@ -1,10 +1,10 @@
-#include <unistd.h> //llamadas al sistema
-#include <sys/types.h> //tipos de dato *_t para el Sistema Operativo
-#include <fcntl.h> //constantes tipo O_*
-#include <sys/stat.h> //información sobre atributos de archivos
-#include <sys/time.h> //funciones de tiempo
-#include <sys/socket.h>//socket
-#include <arpa/inet.h>//funciones usadas para internet
+#include <unistd.h>     //llamadas al sistema
+#include <sys/types.h>  //tipos de dato *_t para el Sistema Operativo
+#include <fcntl.h>      //constantes tipo O_*
+#include <sys/stat.h>   //información sobre atributos de archivos
+#include <sys/time.h>   //funciones de tiempo
+#include <sys/socket.h> //socket
+#include <arpa/inet.h>  //funciones usadas para internet
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -45,10 +45,10 @@
 #define ACK_READY       0
 #define ACK_SENDING     1
 
-typedef struct tftp
-{
+typedef struct tftp {
+
     int                  remote_descriptor;   /* descriptor de socket remoto */
-    int                  local_descriptor;    /* descriptor de socket local*/
+    int                  local_descriptor;    /* descriptor de socket local */
     int                  fd;                  /* descriptor de archivo */
     uint16_t             state;               /* estado */
     uint16_t             tid;                 /* id de transferencia */
@@ -60,19 +60,70 @@ typedef struct tftp
     char                 *file;               /* nombre del archivo */
     struct timeval       now;                 /* temporizador inicial */
     struct timeval       timer;               /* temporizador final */
-    struct sockaddr_in   remote;              /* estructura remota */
-    struct sockaddr_in   local;               /* estructura local */
+    struct sockaddr_in   remote_addr;              /* estructura remota */
+    struct sockaddr_in   local_addr;               /* estructura local */
     socklen_t            size_remote;         /* tamaño estructura remota */
     socklen_t            size_local;            /* tamaño estructura local */
     u_char               lastack[MAX_BUFSIZE];  /* arreglo último ack */
     u_char               msj[BUFSIZE];          /* tamaño max msj a enviar */
     u_char               buf[MAX_BUFSIZE];      /* tamaño max msj a recibir */
+
 } tftp_t;
 
+typedef struct tftp_listen {
+
+    int                  descriptor;    /* descriptor de socket escucha */
+    uint16_t             state;         /* estado */
+    char                 *mode;         /* modo de transferencia */
+    struct sockaddr_in   addr;          /* estructura escucha */
+    socklen_t            size;          /* tamaño estructura escucha */
+    u_char               buf[MAX_BUFSIZE];     /* tamaño max msj a recibir */
+
+} tftp_tl;
+
+void wait_request(tftp_tl * listen) {
+
+    tftp_t * instance;
+    pid_t childPid;
 
 
-int main(int argc, char *argv[])
-{
-    printf("Hello World!\n");
-    return  EXIT_SUCCESS;
+    switch ( childPid = fork() ) {
+    case -1://error
+        perror("fork");
+    case 0://hijo
+
+        break;
+    default://padre
+
+        break;
+    }
+}
+
+int main ( int argc, char *argv[] ) {
+
+    tftp_tl listen;
+
+    /* Inicializamos con 0 los elementos de la estructura */
+
+    memset( &listen.addr, 0, sizeof( struct sockaddr_in ) );
+
+    listen.descriptor = socket(AF_INET, SOCK_DGRAM, 0);
+    listen.mode = MODE_OCTET;
+
+    if ( listen.descriptor == -1 )
+        perror("listen socket");
+
+    /* Asignamos datos del socket escucha */
+
+    listen.addr.sin_family = AF_INET;
+    listen.addr.sin_addr.s_addr = INADDR_ANY;
+    listen.addr.sin_port = htons(69);
+
+    /* Asociamos el descriptor con el puerto que queremos usar */
+    if ( bind( listen.descriptor, (struct sockaddr *) &listen.addr, sizeof(struct sockaddr_in))  == -1 )
+        perror("bind listen");
+
+    wait_request(&listen);
+
+    return EXIT_SUCCESS;
 }

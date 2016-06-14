@@ -81,7 +81,73 @@ typedef struct tftp_listen {
     u_char               buf[MAX_BUFSIZE];     /* tamaño max msj a recibir */
 
 } tftp_tl;
+void data_sent( tftp_t * instance ) {}
+void ack_sent( tftp_t * instance ) {}
+void child(tftp_tl * listen ) {
 
+    tftp_t * instance;
+
+    /* Alojamos memoria dinamicamente */
+    instance = malloc( sizeof( struct tftp ) );
+    //revisar si malloc ha fallado
+
+    /* Asignamos el valor 0 a los elementos de las estructura sockaddr_in */
+
+    memset( instance->local_addr, 0, sizeof( struct sockaddr_in ) );
+    memset( instance->remote_addr, 0, sizeof( struct sockaddr_in ) );
+
+    /* Copiamos el buffer de listen en el buffer de instance */
+    memcpy( instance->buf, listen->buf, MAX_BUFSIZE );
+
+    /* Asociamos los descriptor del socket */
+
+    instance->local_descriptor = socket( AF_INET, SOCK_DGRAM, 0 );
+
+    /* Verificamos que no haya habido errores con la asociación del socket */
+
+    if ( instance->local_descriptor == -1 )
+        perror("instance local socket");
+
+    /* Asigmanos datos del socket local */
+
+    instance->local_addr.sin_family = AF_INET;
+    instance->local_addr.sin_addr.s_addr = INADDR_ANY;
+
+    /* Asigmanos datos del socket remoto; el puerto de destino debe ser el mismo de donde recibimos la petición */
+
+    instance->remote_addr.sin_family = AF_INET;
+    instance->remote_addr.sin_addr.s_addr = INADDR_ANY;
+    instance->remote_addr.sin_port = listen->remote_addr.sin_port;
+
+    /* Guardamos el puerto a donde debemos enviar los datos */
+
+    instance->tid = ntohs( instance->remote_addr.sin_port );
+
+    /* Asociamos el descriptor con el socket que queremos usar */
+
+    if ( bind( instance->local_descriptor, (struct sockaddr *) instance->local_addr, sizeof(struct sockaddr_in))  == -1 )
+        perror("bind local descriptor");
+
+    /* Terminanos de inicializar la estructura instance */
+
+    initialize_server( instance );
+
+    /* Verificamos que el modo de transferencia sea binario */
+
+    if ( strcmp(instance->mode, MODE_OCTET) == 0 ) { //seguimos con la transferencia
+
+        if ( instance->state == STATE_DATA_SENT) data_sent(instance);
+        else ack_sent(instance);
+
+    } else {
+        //enviamos trama con msj de error: "Modo de transferencia no soportado".
+
+        /* El hijo finaliza */
+
+         _exit(EXIT_SUCCESS);
+    }
+
+}
 void initialize_server( tftp_t * instance ) {
 
     u_char *p;
@@ -97,9 +163,8 @@ void initialize_server( tftp_t * instance ) {
 void wait_request(tftp_tl * listen) {
 
     int received;
-    tftp_t * instance;
     pid_t childPid;
-//d
+
     /* limpiamos el buffer */
     memset( listen->buf, 0, MAX_BUFSIZE );
 
@@ -130,52 +195,7 @@ void wait_request(tftp_tl * listen) {
             //falta qué hacer en caso de error
             break;
         case 0://hijo
-
-            /* Alojamos memoria dinamicamente */
-            instance = malloc( sizeof( struct tftp ) );
-            //revisar si malloc ha fallado
-
-            /* Asignamos el valor 0 a los elementos de las estructura sockaddr_in */
-
-            memset( instance->local_addr, 0, sizeof( struct sockaddr_in ) );
-            memset( instance->remote_addr, 0, sizeof( struct sockaddr_in ) );
-
-            /* Copiamos el buffer de listen en el buffer de instance */
-            memcpy( instance->buf, listen->buf, MAX_BUFSIZE );
-
-            /* Asociamos los descriptor del socket */
-
-            instance->local_descriptor = socket( AF_INET, SOCK_DGRAM, 0 );
-
-            /* Verificamos que no haya habido errores con la asociación del socket */
-
-            if ( instance->local_descriptor == -1 )
-                perror("instance local socket");
-
-            /* Asigmanos datos del socket local */
-
-            instance->local_addr.sin_family = AF_INET;
-            instance->local_addr.sin_addr.s_addr = INADDR_ANY;
-
-            /* Asigmanos datos del socket remoto; el puerto de destino debe ser el mismo de donde recibimos la petición */
-
-            instance->remote_addr.sin_family = AF_INET;
-            instance->remote_addr.sin_addr.s_addr = INADDR_ANY;
-            instance->remote_addr.sin_port = listen->remote_addr.sin_port;
-
-            /* Guardamos el puerto a donde debemos enviar los datos */
-
-            instance->tid = ntohs( instance->remote_addr.sin_port );
-
-            /* Asociamos el descriptor con el socket que queremos usar */
-
-            if ( bind( instance->local_descriptor, (struct sockaddr *) instance->local_addr, sizeof(struct sockaddr_in))  == -1 )
-                perror("bind local descriptor");
-
-            /* Termianos de inicializar la estructura instance */
-
-            initialize_server( instance );
-
+            child( listen );
         default://padre
             wait_request( listen );
 

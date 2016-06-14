@@ -83,6 +83,17 @@ typedef struct tftp_listen {
 } tftp_tl;
 void data_sent( tftp_t * instance ) {}
 void ack_sent( tftp_t * instance ) {}
+void initialize_server( tftp_t * instance ) {
+
+    u_char *p;
+    p = instance->buf;
+    p++;
+    p++;
+    instance->file = strtok(p,"\0");
+    instance->mode = strtok(NULL,"\0");
+    instance->err = NULL;
+
+}
 void child(tftp_tl * listen ) {
 
     tftp_t * instance;
@@ -148,18 +159,6 @@ void child(tftp_tl * listen ) {
     }
 
 }
-void initialize_server( tftp_t * instance ) {
-
-    u_char *p;
-    p = instance->buf;
-    p++;
-    p++;
-    instance->file = strtok(p,"\0");
-    instance->mode = strtok(NULL,"\0");
-    instance->err = NULL;
-
-}
-
 void wait_request(tftp_tl * listen) {
 
     int received;

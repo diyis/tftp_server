@@ -47,7 +47,6 @@
 
 typedef struct tftp {
 
-    int                  remote_descriptor;   /* descriptor de socket remoto */
     int                  local_descriptor;    /* descriptor de socket local */
     int                  fd;                  /* descriptor de archivo */
     uint16_t             state;               /* estado */
@@ -72,30 +71,115 @@ typedef struct tftp {
 
 typedef struct tftp_listen {
 
-    int                  descriptor;    /* descriptor de socket escucha */
-    uint16_t             state;         /* estado */
-    char                 *mode;         /* modo de transferencia */
-    struct sockaddr_in   addr;          /* estructura escucha */
-    socklen_t            size;          /* tamaño estructura escucha */
+    int                  descriptor;           /* descriptor de socket escucha */
+    uint16_t             state;                /* estado */
+    char                 *mode;                /* modo de transferencia */
+    struct sockaddr_in   addr;                 /* estructura escucha */
+    struct sockaddr_in   remote_addr;          /* estructura remota */
+    socklen_t            size;                 /* tamaño estructura escucha */
+    socklen_t            remote_size;                 /* tamaño estructura escucha */
     u_char               buf[MAX_BUFSIZE];     /* tamaño max msj a recibir */
 
 } tftp_tl;
 
+void initialize_server( tftp_t * instance ) {
+
+    u_char *p;
+    p = instance->buf;
+    p++;
+    p++;
+    instance->file = strtok(p,"\0");
+    instance->mode = strtok(NULL,"\0");
+    instance->err = NULL;
+
+}
+
 void wait_request(tftp_tl * listen) {
 
+    int received;
     tftp_t * instance;
     pid_t childPid;
 
+    /* limpiamos el buffer */
+    memset( listen->buf, 0, MAX_BUFSIZE );
 
-    switch ( childPid = fork() ) {
-    case -1://error
-        perror("fork");
-    case 0://hijo
+    received = recvfrom( listen->descriptor, listen->buf, MAX_BUFSIZE, MSG_DONTWAIT, (struct sockaddr *) listen->remote, instance->size_remote );
 
-        break;
-    default://padre
+    if( received != -1 ) {
 
-        break;
+        switch ( listen->buf[0] << 8 + listen->buf[1] ) {
+
+        case OPCODE_RRQ:
+            listen->state = STATE_DATA_SENT;
+            break;
+        case OPCODE_WRQ:
+            listen->state = STATE_ACK_SENT;
+            break;
+        default:
+            listen->state = STATE_STANDBY;
+
+        }
+    }
+
+    if ( received == OPCODE_RRQ || received == OPCODE_WRQ ) {
+
+        switch ( childPid = fork() ) {
+
+        case -1://error
+            perror("fork");
+            //falta qué hacer en caso de error
+            break;
+        case 0://hijo
+
+            /* Alojamos memoria dinamicamente */
+            instance = malloc( sizeof( struct tftp ) );
+            //revisar si malloc ha fallado
+
+            /* Asignamos el valor 0 a los elementos de las estructura sockaddr_in */
+
+            memset( instance->local_addr, 0, sizeof( struct sockaddr_in ) );
+            memset( instance->remote_addr, 0, sizeof( struct sockaddr_in ) );
+
+            /* Copiamos el buffer de listen en el buffer de instance */
+            memcpy( instance->buf, listen->buf, MAX_BUFSIZE );
+
+            /* Asociamos los descriptor del socket */
+
+            instance->local_descriptor = socket( AF_INET, SOCK_DGRAM, 0 );
+
+            /* Verificamos que no haya habido errores con la asociación del socket */
+
+            if ( instance->local_descriptor == -1 )
+                perror("instance local socket");
+
+            /* Asigmanos datos del socket local */
+
+            instance->local_addr.sin_family = AF_INET;
+            instance->local_addr.sin_addr.s_addr = INADDR_ANY;
+
+            /* Asigmanos datos del socket remoto; el puerto de destino debe ser el mismo de donde recibimos la petición */
+
+            instance->remote_addr.sin_family = AF_INET;
+            instance->remote_addr.sin_addr.s_addr = INADDR_ANY;
+            instance->remote_addr.sin_port = listen->remote_addr.sin_port;
+
+            /* Guardamos el puerto a donde debemos enviar los datos */
+
+            instance->tid = ntohs( instance->remote_addr.sin_port );
+
+            /* Asociamos el descriptor con el socket que queremos usar */
+
+            if ( bind( instance->local_descriptor, (struct sockaddr *) instance->local_addr, sizeof(struct sockaddr_in))  == -1 )
+                perror("bind local descriptor");
+
+            /* Termianos de inicializar la estructura instance */
+
+            initialize_server( instance );
+
+        default://padre
+            wait_request( listen );
+
+        }
     }
 }
 
@@ -103,12 +187,11 @@ int main ( int argc, char *argv[] ) {
 
     tftp_tl listen;
 
-    /* Inicializamos con 0 los elementos de la estructura */
+    /* Asignamos el valor 0 a los elementos de la estructura sockaddr_in */
 
     memset( &listen.addr, 0, sizeof( struct sockaddr_in ) );
 
     listen.descriptor = socket(AF_INET, SOCK_DGRAM, 0);
-    listen.mode = MODE_OCTET;
 
     if ( listen.descriptor == -1 )
         perror("listen socket");
@@ -119,7 +202,7 @@ int main ( int argc, char *argv[] ) {
     listen.addr.sin_addr.s_addr = INADDR_ANY;
     listen.addr.sin_port = htons(69);
 
-    /* Asociamos el descriptor con el puerto que queremos usar */
+    /* Asociamos el descriptor con el socket que queremos usar */
     if ( bind( listen.descriptor, (struct sockaddr *) &listen.addr, sizeof(struct sockaddr_in))  == -1 )
         perror("bind listen");
 

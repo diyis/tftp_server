@@ -99,7 +99,7 @@ void wait_request(tftp_tl * listen) {
     int received;
     tftp_t * instance;
     pid_t childPid;
-
+//d
     /* limpiamos el buffer */
     memset( listen->buf, 0, MAX_BUFSIZE );
 

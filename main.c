@@ -441,8 +441,8 @@ void start_ack_send( tftp_t * instance ) {
     ack_send( instance );
 
 }
-void child(tftp_tl * listen ) {
 
+void child(tftp_tl * listen ) {
     tftp_t * instance;
 
     /* Cerramos el descriptor del padre que no usaremos en el hijo */
@@ -450,79 +450,68 @@ void child(tftp_tl * listen ) {
 
     /* Alojamos memoria dinamicamente */
     instance = malloc( sizeof( struct tftp ) );
+    
     //revisar si malloc ha fallado
+    if(instance){
+	/* Asignamos el valor 0 a los elementos de las estructura sockaddr_in */
+	memset( &instance->local_addr, 0, sizeof( struct sockaddr_in ) );
+	memset( &instance->remote_addr, 0, sizeof( struct sockaddr_in ) );
 
-    /* Asignamos el valor 0 a los elementos de las estructura sockaddr_in */
+	/* Copiamos el buffer de listen en el buffer de instance */
+	memcpy( instance->buf, listen->buf, MAX_BUFSIZE );
 
-    memset( instance->local_addr, 0, sizeof( struct sockaddr_in ) );
-    memset( instance->remote_addr, 0, sizeof( struct sockaddr_in ) );
+	/* Asociamos los descriptor del socket */
+	instance->local_descriptor = socket( AF_INET, SOCK_DGRAM, 0 );
 
-    /* Copiamos el buffer de listen en el buffer de instance */
-    memcpy( instance->buf, listen->buf, MAX_BUFSIZE );
+	/* Verificamos que no haya errores con la asociación del socket */
+	if ( instance->local_descriptor == -1 )
+	    perror("instance local socket");    //PP: Creo que deberías de meter todo lo demás en un else.
 
-    /* Asociamos los descriptor del socket */
+	/* Asigmanos datos del socket local */
+	instance->local_addr.sin_family = AF_INET;
+	instance->local_addr.sin_addr.s_addr = INADDR_ANY;
 
-    instance->local_descriptor = socket( AF_INET, SOCK_DGRAM, 0 );
+	/* Asigmanos datos del socket remoto; el puerto de destino debe ser el mismo de donde recibimos la petición */    
+	instance->remote_addr.sin_family = AF_INET;
+	instance->remote_addr.sin_addr.s_addr = INADDR_ANY;
+	instance->remote_addr.sin_port = listen->remote_addr.sin_port;
 
-    /* Verificamos que no haya errores con la asociación del socket */
+	/* Guardamos el puerto a donde debemos enviar los datos */
+	instance->tid = ntohs( instance->remote_addr.sin_port );
 
-    if ( instance->local_descriptor == -1 )
-        perror("instance local socket");
+	/* Asociamos el descriptor con el socket que queremos usar */
+	if ( bind( instance->local_descriptor, (struct sockaddr *) &instance->local_addr, sizeof(struct sockaddr_in))  == -1 )
+	    perror("bind local descriptor");
 
-    /* Asigmanos datos del socket local */
+	/* Terminanos de inicializar la estructura instance */
+	initialize_server( instance );
 
-    instance->local_addr.sin_family = AF_INET;
-    instance->local_addr.sin_addr.s_addr = INADDR_ANY;
+	/* Verificamos que el modo de transferencia sea binario para seguir con la transferencia */
+	if ( strcmp(instance->mode, MODE_OCTET) == 0 ) {
+	    if ( instance->state == STATE_DATA_SENT) start_data_send(instance);
+	    else start_ack_send(instance);
+	} else {
+	    //enviamos trama con msj de error: "Modo de transferencia no soportado".
 
-    /* Asigmanos datos del socket remoto; el puerto de destino debe ser el mismo de donde recibimos la petición */
-
-    instance->remote_addr.sin_family = AF_INET;
-    instance->remote_addr.sin_addr.s_addr = INADDR_ANY;
-    instance->remote_addr.sin_port = listen->remote_addr.sin_port;
-
-    /* Guardamos el puerto a donde debemos enviar los datos */
-
-    instance->tid = ntohs( instance->remote_addr.sin_port );
-
-    /* Asociamos el descriptor con el socket que queremos usar */
-
-    if ( bind( instance->local_descriptor, (struct sockaddr *) instance->local_addr, sizeof(struct sockaddr_in))  == -1 )
-        perror("bind local descriptor");
-
-    /* Terminanos de inicializar la estructura instance */
-
-    initialize_server( instance );
-
-    /* Verificamos que el modo de transferencia sea binario para seguir con la transferencia */
-
-    if ( strcmp(instance->mode, MODE_OCTET) == 0 ) {
-
-        if ( instance->state == STATE_DATA_SENT) start_data_send(instance);
-        else start_ack_send(instance);
-
-    } else {
-        //enviamos trama con msj de error: "Modo de transferencia no soportado".
-
-        /* El hijo finaliza */
-
-        exit(EXIT_SUCCESS);
+	    /* El hijo finaliza */
+	    exit(EXIT_SUCCESS);
+	}
+    }else{
+	perror("child(): Fallo al crear memoria para instance");
+	exit(EXIT_FAILURE);
     }
-
 }
-void wait_request(tftp_tl * listen) {
 
+void wait_request(tftp_tl * listen) {
     int received;
     pid_t childPid;
 
-    /* limpiamos el buffer */
-    memset( listen->buf, 0, MAX_BUFSIZE );
-
-    received = recvfrom( listen->descriptor, listen->buf, MAX_BUFSIZE, MSG_DONTWAIT, (struct sockaddr *) listen->remote, instance->size_remote );
+    memset( listen->buf, 0, MAX_BUFSIZE );    /* limpiamos el buffer */
+    received = recvfrom( listen->descriptor, listen->buf, MAX_BUFSIZE,
+			 MSG_DONTWAIT, (struct sockaddr *) &listen->remote_addr, &listen->remote_size );//PP: el último parametro estaba como instance->size_remote
 
     if( received != -1 ) {
-
         switch ( listen->buf[0] << 8 + listen->buf[1] ) {
-
         case OPCODE_RRQ:
             listen->state = STATE_DATA_SENT;
             break;
@@ -531,45 +520,40 @@ void wait_request(tftp_tl * listen) {
             break;
         default:
             listen->state = STATE_STANDBY;
-
         }
     }
 
     if ( received == OPCODE_RRQ || received == OPCODE_WRQ ) {
-
         switch ( childPid = fork() ) {
-
         case -1://error
             perror("fork");
             //falta qué hacer en caso de error
             break;
         case 0://hijo
             child( listen );
+	    break;  //PP: Creo que aquí faltaba un break, de lo contrario el hijo también entraria en bucle recursivo de wait_request
         default://padre
             wait_request( listen );
-
         }
     }
 }
 
 int main ( int argc, char *argv[] ) {
-
     tftp_tl listen;
 
     /* Asignamos el valor 0 a los elementos de la estructura sockaddr_in */
-
     memset( &listen.addr, 0, sizeof( struct sockaddr_in ) );
-
     listen.descriptor = socket(AF_INET, SOCK_DGRAM, 0);
 
     if ( listen.descriptor == -1 )
         perror("listen socket");
-
+    //PP: Creo que deberías de meter todo lo demás en un else .
     /* Asignamos datos del socket escucha */
 
     listen.addr.sin_family = AF_INET;
-    listen.addr.sin_addr.s_addr = INADDR_ANY;
-    listen.addr.sin_port = htons(69);
+    listen.addr.sin_addr.s_addr = INADDR_ANY; //PP: IPv4 in network byte order, wildcard address
+    listen.addr.sin_port = htons(69); //convierte a network byte order
+    listen.remote_size = sizeof(struct sockaddr_in);
 
     /* Asociamos el descriptor con el socket que queremos usar */
     if ( bind( listen.descriptor, (struct sockaddr *) &listen.addr, sizeof(struct sockaddr_in))  == -1 )

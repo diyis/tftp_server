@@ -137,7 +137,7 @@ void initialize_server( tftp_t * instance ) {
     p++;
     instance->file = strtok(p,"\0");
     instance->mode = strtok(NULL,"\0");
-    instance->err = NULL;
+    instance->msjerr = NULL;
 
 }
 
@@ -216,7 +216,7 @@ void data_send( tftp_t * instance ) {
 }
 
 void start_data_send( tftp_t * instance ) {
-    size_t sent;
+    ssize_t sent; //Corrección de size_t a ssize_t para que pueda aceptar negativos
     
     /* Comprobamos si hay errores */
     if ( access( instance->file, F_OK ) != 0 ) {
@@ -226,10 +226,10 @@ void start_data_send( tftp_t * instance ) {
         instance->err = ERR_ACCESS_DENIED;
         instance->msjerr = "No hay permisos de lectura.";
     }else
-        instance->err = NULL;
+        instance->msjerr = NULL;
 
     /* Si hay errores, enviar msj de error y terminar */
-    if ( !instance->err ) {   //PP: Creo que este if debería de quedar como: if(instance->err)
+    if ( !instance->msjerr ) {   //PP: Creo que este if debería de quedar como: if(instance->err)
         build_error( instance );
         sent = sendto( instance->local_descriptor, instance->buf, MAX_BUFSIZE, 0, (struct sockaddr *) &instance->remote_addr, sizeof( struct sockaddr_in ) );
 
@@ -241,7 +241,7 @@ void start_data_send( tftp_t * instance ) {
         close( instance->local_descriptor );
 
         /* Hijo finaliza */
-        exit(EXIT_SUCCESS); //PP:Creo que debería de quedar con EXIT_FAILURE
+        _exit(EXIT_FAILURE); //PP:Creo que debería de quedar con EXIT_FAILURE
     }
 
     /* Inicializamos las variables a usar */
@@ -250,7 +250,7 @@ void start_data_send( tftp_t * instance ) {
     /* Verificamos que el descriptor de archivo se haya abierto correctamente */
     instance->fd = open( instance->file, O_RDONLY );
 
-    if ( instance->fd == -1 ) { //PP:Creo que tal vez y sólo tal vez no es necesaria esta verificación 
+    //if ( instance->fd == -1 ) { //PP:Creo que tal vez y sólo tal vez no es necesaria esta verificación 
         /* Enviamos msj de error */
         //instance->err = "No se puede abrir el archivo para lectura."; //PP:Creo que esto debería de ser igualado a un int
 	instance->err = ERR_ACCESS_DENIED;
@@ -259,12 +259,12 @@ void start_data_send( tftp_t * instance ) {
 
         /* Verificamos que hayamos enviado el msj correctamente */
         if ( sent != strlen( instance->buf ) )
-            perror("child start_data_send() no se envio el msg correctamente");
+            perror("child start_data_send() no se envió el msg correctamente");
 
         /* Cerramos descriptor de socket */
         close( instance->local_descriptor );
         exit(EXIT_SUCCESS); /* Hijo finaliza */
-    }
+	//}
 
     /* Seguimos */
     data_send( instance );
@@ -309,7 +309,8 @@ void ack_send( tftp_t * instance ) {
             /* Verificamos si es el último msj por recibir */
             if( received < MAX_BUFSIZE ) {
                 /* Escribimos en el archivo */
-                write( *instance->file, instance->msj, received-4 );
+                //write( instance->file, instance->msj, received-4 );
+		write( instance->fd, instance->msj, received-4 );
 
                 /* Generamos el último ack */
                 instance->blknum++;
@@ -351,14 +352,14 @@ void start_ack_send( tftp_t * instance ) {
     int sent;
 
     /* Comprobamos si hay errores */
-    if ( access( ".", W_OK ) == 0 ) instance->err = NULL;
+    if ( access( ".", W_OK ) == 0 ) instance->msjerr = NULL;
     else {
         instance->err = ERR_ACCESS_DENIED;
         instance->msjerr = "No hay permisos.";
     }
 
     /* Si hay errores, enviar msj de error y terminar */
-    if ( !instance->err ) { //PP:Creo que el if debería de ir sin la negación
+    if ( !instance->msjerr ) { //PP:Creo que el if debería de ir sin la negación
         build_error( instance );
         sent = sendto( instance->local_descriptor, instance->buf, MAX_BUFSIZE, 0, (struct sockaddr *) &instance->remote_addr, sizeof( struct sockaddr_in ) );
 
@@ -368,7 +369,7 @@ void start_ack_send( tftp_t * instance ) {
 
         /* Cerramos descriptor de socket */
         close( instance->local_descriptor );
-        exit(EXIT_SUCCESS); /* Hijo finaliza PP:Creo que debería de ser con EXIT_FAILURE*/ 
+        _exit(EXIT_FAILURE);
     }
     
     /* Inicializamos las variables a usar */
@@ -422,7 +423,7 @@ void child(tftp_tl * listen ) {
 	initialize_server( instance );
 
 	/* Verificamos que el modo de transferencia sea binario para seguir con la transferencia */
-	if ( strcmp(instance->mode, MODE_OCTET) == 0 ) { //PP: Creo que instance-mode no esta inicializado al valor que debería
+	if ( strcmp(instance->mode, MODE_OCTET) == 0 ) {
 	    if ( instance->state == STATE_DATA_SENT) start_data_send(instance);
 	    else start_ack_send(instance);
 	} else {
@@ -482,7 +483,6 @@ int main ( int argc, char *argv[] ) {
 
     if ( listen.descriptor == -1 )
         perror("listen socket");
-    //PP: Creo que deberías de meter todo lo demás en un else .
     /* Asignamos datos del socket escucha */
     listen.addr.sin_family = AF_INET;
     listen.addr.sin_addr.s_addr = INADDR_ANY; //PP: IPv4 in network byte order, wildcard address

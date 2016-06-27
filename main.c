@@ -10,6 +10,7 @@
 #include <sys/wait.h>  //
 #include <errno.h>
 #include <string.h>
+#include <stdarg.h>     //Manejar argumentos del tipo " ... "
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,7 @@
 #define DEF_TIMEOUT_USEC 1000000
 #define BUFSIZE          512
 #define MAX_BUFSIZE     (4 + BUFSIZE)
+#define ACK_BUFSIZE      4
 
 #define MODE_OCTET      "octet"
 #define MODE_NETASCII   "netascii"
@@ -85,6 +87,32 @@ typedef struct tftp_listen {
 
 } tftp_tl;
 
+void err_log_exit( int priority, const char *format, ... ){
+
+    va_list args;
+
+    //Redireccionar "..." a vsyslog
+    
+    va_start(args, format);
+    vsyslog(priority, format, args );
+    va_end(args);
+
+    syslog(LOG_CRIT, "FATAL ERROR. Shutting down server ...");
+    exit(EXIT_FAILURE);
+}
+
+void _err_log_exit( int priority, const char *format, ... ){
+
+    va_list args;
+    
+    va_start(args, format);
+    vsyslog(priority, format, args);
+    va_end(args);
+    
+    syslog(LOG_CRIT, "FATAL ERROR. Killing child ...");
+    _exit(EXIT_FAILURE);
+}
+
 void build_data_msg( tftp_t * instance ) {
 
     u_char *p;
@@ -119,7 +147,7 @@ void build_ack_msg( tftp_t * instance ) {
     *p =   OPCODE_ACK & 0xff;               p++;
     *p = ( instance->blknum >> 8 ) & 0xff;  p++;
     *p =   instance->blknum & 0xff;         p++;
-    memset( p, 0, BUFSIZE );
+    memset( p, 0, BUFSIZE );   // PP: Creoq que debería de ser MAX_BUFSIZE
 
 }
 
@@ -133,15 +161,24 @@ void dec_data( tftp_t * instance ) {
 }
 
 void initialize_server( tftp_t * instance ) {
-
     u_char *p;
     p = instance->buf;
-    p++;
+    p++; //PP: Tal vez y sólo tal vez quedaría mejor como p+=2;
     p++;
     instance->file = strtok(p,"\0");
-    instance->mode = strtok(NULL,"\0");
-    instance->msgerr = NULL;
 
+    /*PP: VALIDACIÓN: Si instance->file es nulo significa que el
+      cliente no especificó un nombre de archivo.
+      NOTA: Tal vez sería una buena idea enviar un paquetito de error al cliente con 
+      el código 0 : File not found*/
+    
+    if( instance->file ) p+= strlen(instance->file) + 1;
+    else _err_log_exit( LOG_ERR, "Error from initialize_server() in strtok(file): "
+			"File name not specified");
+    
+    instance->mode = strtok(p,"\0");
+    instance->msgerr = NULL;
+    instance->size_remote = sizeof(struct sockaddr_in);
 }
 
 void data_send( tftp_t * instance ) {
@@ -171,7 +208,7 @@ void data_send( tftp_t * instance ) {
 
     /* Verificamos que se haya enviado correctamente */
     if( sent != 4 + offset )
-        perror("child data_send() sent ack");
+	syslog(LOG_ERR, "Error from sendto() in data_send(): %s", strerror(errno));
 
     /* Iniciamos los temporizadores */
     gettimeofday( &instance->now, 0 );
@@ -179,23 +216,43 @@ void data_send( tftp_t * instance ) {
 
     /* Esperamos el siguiente ack */
     while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
-        received = recvfrom( instance->local_descriptor, instance->buf, MAX_BUFSIZE, MSG_DONTWAIT, (struct sockaddr *) &instance->remote_addr, &instance->size_remote );
+        received = recvfrom( instance->local_descriptor,
+			     instance->buf,
+			     MAX_BUFSIZE,
+			     MSG_DONTWAIT, //Probemos TEMPORALMENTE con 0
+			     //0,
+			     (struct sockaddr *) &instance->remote_addr,
+			     &instance->size_remote );
 
         /* Verificamos que haya llegado un msg válido, se debe cumplir:
 	   1. Que received sea distinto a -1 
 	   2. Que el OPCODE sea OPCODE_ACK 
 	   3. Que el ack corresponda al blknum que esperamos 
-       4. Que el msg sea de donde lo esperamos (mismo tid del inicio de la transferencia) */
+	   4. Que el msg sea de donde lo esperamos (mismo tid del inicio de la transferencia) */
 
-        if( received != -1 && ( instance->buf[0] << 8 + instance->buf[1] == OPCODE_ACK ) && ( instance->buf[2] << 8 + instance->buf[3]  == instance->blknum ) && ( instance->tid == ntohs( instance->remote_addr.sin_port ) ) ) {
+	/* //DEBUGEANDO ...
+	syslog( LOG_ERR , "==========================================================");
+	syslog( LOG_NOTICE, "RECEIVED: >%d<", received);
+	//received = (listen->buf[0] << 8) + listen->buf[1];
+	syslog( LOG_NOTICE, "RECEIVED OPCODE_ACK: >%d<", (instance->buf[0] << 8) + instance->buf[1] );
+	syslog( LOG_NOTICE, "RECEIVED BLKNUM: >%d<", (instance->buf[2] << 8) + instance->buf[3]);
+	syslog( LOG_NOTICE, "SERVER BLKNUM: >%d<", instance->blknum);
+	syslog( LOG_ERR , "=========================================================="); */
+	
+        if( received != -1
+	    && ( (instance->buf[0] << 8) + instance->buf[1] == OPCODE_ACK )
+	    && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum )
+	    && ( instance->tid == ntohs( instance->remote_addr.sin_port ) ) ) {
 
             /* Si hemos enviado el último msg y recibido el último ack, terminamos */
             if( offset < BUFSIZE ) {
+		
+		syslog( LOG_NOTICE , "File send complete.");
 
                 /* Cerramos el descriptor de archivo y de socket */
                 close( instance->fd );
                 close( instance->local_descriptor );
-
+		
                 /* Hijo finaliza */
                 exit( EXIT_SUCCESS );
             }
@@ -224,26 +281,43 @@ void data_send( tftp_t * instance ) {
 
 void start_data_send( tftp_t * instance ) {
     ssize_t sent;
-    
+    //puts ("En start_data_send()");
+    syslog( LOG_NOTICE, "File requested for read: %s", instance->file);
+
     /* Comprobamos si hay errores */
     if ( access( instance->file, F_OK ) != 0 ) {
         instance->err = ERR_NOT_FOUND;
         instance->msgerr = "No existe el archivo.";
+	syslog( LOG_ERR, "Error access() on start_data_send(): %s", strerror(errno));
     }else if ( access( instance->file, R_OK ) != 0 ) {
         instance->err = ERR_ACCESS_DENIED;
         instance->msgerr = "No hay permisos de lectura.";
+	syslog( LOG_ERR, "Error access() on start_data_send(): %s", strerror(errno));
     }else
         instance->msgerr = NULL;
 
     /* Si hay errores, enviar msg de error y terminar */
-    if ( !instance->msgerr ) {
+    if ( instance->msgerr ) {
+
         build_error( instance );
-        sent = sendto( instance->local_descriptor, instance->buf, MAX_BUFSIZE, 0, (struct sockaddr *) &instance->remote_addr, sizeof( struct sockaddr_in ) );
 
+	syslog( LOG_NOTICE , "Enviando al cliente pktiton con los errores ....");
+        sent = sendto( instance->local_descriptor,
+		       instance->buf,
+		       MAX_BUFSIZE,
+		       0,
+		       (struct sockaddr *) &instance->remote_addr,
+		       //sizeof( struct sockaddr_in ) );
+		       instance->size_remote);
+
+	syslog( LOG_NOTICE , "sent resultante >%d<" , sent);
         /* Verificamos que hayamos enviado el msg correctamente */
-        if ( sent != strlen( instance->buf ) )
-            perror("start_data_send() child");
+        //if ( sent != strlen( instance->buf ) ){
 
+	//Estoy casi seguro de que debería de quedar así:
+	if ( sent != MAX_BUFSIZE )
+	    syslog(LOG_ERR, "Error from sendto() in start_data_send(): %s", strerror(errno));
+		
         /* Cerramos descriptor de socket */
         close( instance->local_descriptor );
 
@@ -258,24 +332,37 @@ void start_data_send( tftp_t * instance ) {
     instance->fd = open( instance->file, O_RDONLY );
 
     /* Seguimos */
+    syslog( LOG_NOTICE, "Sending file ...");
     data_send( instance );
 }
 
 void ack_send( tftp_t * instance ) {
     int sent,received;
     off_t offset;
-
+    
+    //    syslog( LOG_NOTICE, "EN ACK_SEND()");
+    
     /* Generamos el ack */
     build_ack_msg( instance );
 
     /* Enviamos el ack */
-    sent = sendto( instance->local_descriptor, instance->buf, 4, 0, (struct sockaddr *) &instance->remote_addr, sizeof( struct sockaddr_in ) );
-
+    sent = sendto( instance->local_descriptor,
+		   instance->buf,
+		   ACK_BUFSIZE,
+		   0,
+		   (struct sockaddr *) &instance->remote_addr,
+		   //sizeof( struct sockaddr_in ) ); //Creo que es mejor sólo calcularlo una vez en la inicialización 
+		   instance->size_remote);
     /* Verificamos que se haya enviado correctamente */
-    if ( sent != 4 )
-        perror("sent ack");
+    //syslog( LOG_INFO, "DESPUÉS DEL sendto(): send : >%d<", sent);
+    
+    if ( sent != ACK_BUFSIZE )
+	syslog( LOG_ERR, "Error from sendto() in ack_send(): %s", strerror(errno));
 
     /* Iniciamos los temporizadores */
+
+    //syslog( LOG_NOTICE, "ANTES DE PONER LOS TIMERS");
+    
     gettimeofday( &instance->now, 0 );
     gettimeofday( &instance->timer, 0 );
 
@@ -284,7 +371,14 @@ void ack_send( tftp_t * instance ) {
 
     /* Esperamos el siguiente msg */
     while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
-        received = recvfrom( instance->local_descriptor, instance->buf, MAX_BUFSIZE, MSG_DONTWAIT, (struct sockaddr *) &instance->remote_addr, &instance->size_remote );
+	//syslog( LOG_NOTICE, "<DEPURACION> Esperando el siguiente msg ...");
+	
+        received = recvfrom( instance->local_descriptor,
+			     instance->buf,
+			     MAX_BUFSIZE,
+			     MSG_DONTWAIT,
+			     (struct sockaddr *) &instance->remote_addr,
+			     &instance->size_remote );
 
         /* Verificamos que haya llegado un msg válido, se debe cumplir: */
         /* 1. Que received sea distinto a -1 */
@@ -292,7 +386,11 @@ void ack_send( tftp_t * instance ) {
         /* 3. Que el blknum sea el que esperamos */
         /* 4. Que el msg sea de donde lo esperamos (mismo tid del inicio de la transferencia) */
 
-        if ( received != -1 && ( instance->buf[0] + instance->buf[1]  == OPCODE_DATA ) && ( instance->buf[2] << 8 + instance->buf[3]  == instance->blknum + 1 ) && instance->tid == ntohs(instance->remote_addr.sin_port) ) {
+        if ( received != -1
+	     //&& ( instance->buf[0] + instance->buf[1]  == OPCODE_DATA )
+	     && ( (instance->buf[0] << 8) + instance->buf[1]  == OPCODE_DATA )
+	     && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum + 1 )
+	     && instance->tid == ntohs(instance->remote_addr.sin_port) ) {
 
             /* Procesamos los datos recibidos */
             dec_data( instance );
@@ -301,23 +399,34 @@ void ack_send( tftp_t * instance ) {
             if ( received < MAX_BUFSIZE ) {
                 /* Escribimos en el archivo */
                 //write( instance->file, instance->msg, received-4 );
-        write( instance->fd, instance->msg, received-4 );
+		
+		//syslog( LOG_NOTICE, "File write complete.");
+		
+		write( instance->fd, instance->msg, received-4 );
 
+		
                 /* Generamos el último ack */
                 instance->blknum++;
                 build_ack_msg( instance );
 
                 /* Enviamos el último msg */
-                sent = sendto( instance->local_descriptor, instance->buf, 4, 0, (struct sockaddr *) &instance->remote_addr, sizeof( struct sockaddr_in ) );
+                sent = sendto( instance->local_descriptor,
+			       instance->buf,
+			       4,
+			       0,
+			       (struct sockaddr *) &instance->remote_addr,
+			       sizeof( struct sockaddr_in ) );
 
                 /* Verificamos que se haya enviado correctamente */
                 if ( sent != 4 )
-                    perror("child ack_send()");
-
+		    syslog(LOG_ERR, "Error from sendto() in ack_send(): %s", strerror(errno));
+		
                 /* Cerramos el descriptor de archivo y de socket */
                 close( instance->fd );
                 close( instance->local_descriptor );
 
+		//syslog( LOG_NOTICE, "File write complete.");
+		
                 /* Hijo finaliza */
                 _exit(EXIT_SUCCESS);
             }
@@ -342,23 +451,33 @@ void ack_send( tftp_t * instance ) {
 void start_ack_send( tftp_t * instance ) {
     int sent;
 
+    //    puts("En start_ack_send() ");
+    
     /* Comprobamos si hay errores */
     if ( access( ".", W_OK ) == 0 ) instance->msgerr = NULL;
     else {
         instance->err = ERR_ACCESS_DENIED;
         instance->msgerr = "No hay permisos.";
+	syslog( LOG_ERR, "start_ack_send(): No hay permisos");
     }
 
     /* Si hay errores, enviar msg de error y terminar */
-    if ( !instance->msgerr ) {
-
+    if ( instance->msgerr ) {   // Creo que iba sin el "!"
+	
+	//syslog(LOG_ERR, "HUBO ERRORES");
+	
         build_error( instance );
-        sent = sendto( instance->local_descriptor, instance->buf, MAX_BUFSIZE, 0, (struct sockaddr *) &instance->remote_addr, sizeof( struct sockaddr_in ) );
+        sent = sendto( instance->local_descriptor,
+		       instance->buf,
+		       MAX_BUFSIZE,
+		       0,
+		       (struct sockaddr *) &instance->remote_addr,
+		       sizeof( struct sockaddr_in ) );
 
         /* Verificamos que hayamos enviado el msg correctamente */
 
         if ( sent != strlen( instance->buf ) )
-            perror("child start_ack_send() sent");
+	    syslog(LOG_ERR, "Error from sendto() in child start_ack_send(): %s", strerror(errno));
 
         /* Cerramos descriptor de socket */
 
@@ -367,17 +486,21 @@ void start_ack_send( tftp_t * instance ) {
     }
     
     /* Inicializamos las variables a usar */
-
+    
     instance->blknum = 0;
-    instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC );
+    instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC, 0666 ); //PP: NPI
 
      /* Seguimos */
-
+    
+    //syslog( LOG_NOTICE, "Writing file %s ..." , instance->file);
     ack_send( instance );
 }
 
 void child(tftp_tl * listen ) {
     tftp_t * instance;
+
+    //syslog( LOG_NOTICE , "En child () ... ");
+    //    puts("En child() ...");
 
     /* Cerramos el descriptor del padre que no usaremos en el hijo */
 
@@ -389,72 +512,86 @@ void child(tftp_tl * listen ) {
     
     //revisar si malloc ha fallado
 
-    if ( !instance ) {
-        syslog(LOG_ERR, "Error from malloc() in child(): %s", strerror(errno));
-        _exit(EXIT_FAILURE);
+    if ( !instance ) 
+	_err_log_exit(LOG_ERR, "Error from malloc() in child(): %s", strerror(errno));
+
+    /* Asignamos el valor 0 a los elementos de las estructura sockaddr_in */
+
+    memset( &instance->local_addr, 0, sizeof( struct sockaddr_in ) );
+    memset( &instance->remote_addr, 0, sizeof( struct sockaddr_in ) );
+
+    /* Copiamos el buffer de listen en el buffer de instance */
+
+    memcpy( instance->buf, listen->buf, MAX_BUFSIZE );
+
+    //syslog( LOG_NOTICE , "alfa");
+
+    /* Asociamos los descriptor del socket */
+
+    instance->local_descriptor = socket( AF_INET, SOCK_DGRAM, 0 );
+
+    /* Verificamos que no haya errores con la asociación del socket */
+
+    if ( instance->local_descriptor == -1 ) 
+	_err_log_exit(LOG_ERR, "Error from socket() in child(): %s", strerror(errno));
+
+    /* Asigmanos datos del socket local. NOTA: Usando un puerto efímero ...*/
+
+    instance->local_addr.sin_family = AF_INET;
+    instance->local_addr.sin_addr.s_addr = INADDR_ANY;
+    instance->local_addr.sin_port = htons(0);
+
+    /* Asigmanos datos del socket remoto; el puerto de destino debe ser el mismo de donde recibimos la petición */
+
+    /*
+    instance->remote_addr.sin_family = AF_INET;
+    instance->remote_addr.sin_addr.s_addr = INADDR_ANY;
+    instance->remote_addr.sin_port = listen->remote_addr.sin_port;*/
+
+    //Humildemente pienso que no se debería de mover el remote_addr, así como llega. Ahora, me retiraré lentamente ...
+    instance->remote_addr = listen->remote_addr;
+
+    //    syslog( LOG_NOTICE, "bravo");
+
+    /* Guardamos el puerto a donde debemos enviar los datos */
+
+    instance->tid = ntohs( instance->remote_addr.sin_port );
+
+    /* Asociamos el descriptor con el socket que queremos usar */
+    //    syslog ( LOG_NOTICE , "charly");
+
+    //Probemos usando un puertito efimero
+    
+    if ( bind( instance->local_descriptor,
+	       (struct sockaddr *) &instance->local_addr,
+	       sizeof(struct sockaddr_in))  == -1 )
+	_err_log_exit(LOG_ERR, "Error from bind() in child(): %s", strerror(errno));
+
+    /* Terminanos de inicializar la estructura instance */
+    //syslog ( LOG_NOTICE ,  "delta" );
+
+    initialize_server( instance );
+
+    instance->state = listen->state;   //Pequeño detalle
+
+    /* Verificamos que el modo de transferencia sea binario para seguir con la transferencia */
+
+    if ( strcmp(instance->mode, MODE_OCTET) == 0 )
+	if ( instance->state == STATE_DATA_SENT) start_data_send(instance);
+	else start_ack_send(instance);
+    
+    else if ( strcmp(instance->mode, MODE_NETASCII) == 0 ) {
+	//Tendré que leer otra vez unos caps para hacer esto .... 
+	
+    } else {
+	//enviamos trama con msg de error: "Modo de transferencia no soportado".
+	
+	//Aún falta lo de enviar la trama ...
+	_err_log_exit( LOG_ERR, "MODO DE TRANSFERENCIA NO SOPORTADO ...");
+
+	/* El hijo finaliza */
+	//exit(EXIT_SUCCESS);
     }
-
-        /* Asignamos el valor 0 a los elementos de las estructura sockaddr_in */
-
-        memset( &instance->local_addr, 0, sizeof( struct sockaddr_in ) );
-        memset( &instance->remote_addr, 0, sizeof( struct sockaddr_in ) );
-
-        /* Copiamos el buffer de listen en el buffer de instance */
-
-        memcpy( instance->buf, listen->buf, MAX_BUFSIZE );
-
-        /* Asociamos los descriptor del socket */
-
-        instance->local_descriptor = socket( AF_INET, SOCK_DGRAM, 0 );
-
-        /* Verificamos que no haya errores con la asociación del socket */
-
-        if ( instance->local_descriptor == -1 ) {
-            syslog(LOG_ERR, "Error from socket() in child(): %s", strerror(errno));
-            _exit(EXIT_FAILURE);
-        }
-
-
-        /* Asigmanos datos del socket local */
-
-        instance->local_addr.sin_family = AF_INET;
-        instance->local_addr.sin_addr.s_addr = INADDR_ANY;
-
-        /* Asigmanos datos del socket remoto; el puerto de destino debe ser el mismo de donde recibimos la petición */
-
-        instance->remote_addr.sin_family = AF_INET;
-        instance->remote_addr.sin_addr.s_addr = INADDR_ANY;
-        instance->remote_addr.sin_port = listen->remote_addr.sin_port;
-
-        /* Guardamos el puerto a donde debemos enviar los datos */
-
-        instance->tid = ntohs( instance->remote_addr.sin_port );
-
-        /* Asociamos el descriptor con el socket que queremos usar */
-
-        if ( bind( instance->local_descriptor, (struct sockaddr *) &instance->local_addr, sizeof(struct sockaddr_in))  == -1 ){
-            syslog(LOG_ERR, "Error from bind() in child(): %s", strerror(errno));
-            _exit(EXIT_FAILURE);
-        }
-
-        /* Terminanos de inicializar la estructura instance */
-
-        initialize_server( instance );
-
-        /* Verificamos que el modo de transferencia sea binario para seguir con la transferencia */
-
-        if ( strcmp(instance->mode, MODE_OCTET) == 0 ) {
-
-            if ( instance->state == STATE_DATA_SENT) start_data_send(instance);
-            else start_ack_send(instance);
-
-        } else {
-            //enviamos trama con msg de error: "Modo de transferencia no soportado".
-
-            /* El hijo finaliza */
-            exit(EXIT_SUCCESS);
-        }
-
 }
 
 static void wait_request(tftp_tl * listen) {
@@ -462,18 +599,32 @@ static void wait_request(tftp_tl * listen) {
     ssize_t received;
     pid_t childPid;
 
-     /* limpiamos el buffer y esperamos msg válido */
+    /* limpiamos el buffer y esperamos msg válido */
 
     memset( listen->buf, 0, MAX_BUFSIZE );
-    received = recvfrom( listen->descriptor, listen->buf, MAX_BUFSIZE, MSG_DONTWAIT, (struct sockaddr *) &listen->remote_addr, &listen->remote_size );
+
+    syslog( LOG_NOTICE, "Listening on default port ... ");
+    
+    received = recvfrom( listen->descriptor,
+			 listen->buf,
+			 MAX_BUFSIZE,
+			 //MSG_DONTWAIT, //Estoy casi seguro de que esto no debería de ser MSG_DONTWAIT, y ninguna de las otras flags del cap 61.3 del libro de Linux me convenció :/
+			 0,
+			 (struct sockaddr *) &listen->remote_addr,
+			 &listen->remote_size );
+    
+    if( received == -1)
+	syslog(LOG_ERR, "Error from recvfrom() in wait_request(): %s", strerror(errno));
 
     if( received != -1 ) {
 
-        switch ( (listen->buf[0] << 8) + listen->buf[1] ) {
+        switch ( received = (listen->buf[0] << 8) + listen->buf[1] ) { //Modificaré un poco el received para poder usarlo después ...
         case OPCODE_RRQ:
+	    syslog( LOG_NOTICE, "Received Read Request.");
             listen->state = STATE_DATA_SENT;
             break;
         case OPCODE_WRQ:
+	    syslog( LOG_NOTICE, "Received Write Request.");
             listen->state = STATE_ACK_SENT;
             break;
         default:
@@ -481,22 +632,20 @@ static void wait_request(tftp_tl * listen) {
         }
 
     }
-
+    
     if ( received == OPCODE_RRQ || received == OPCODE_WRQ )  {
 
         switch ( childPid = fork() ) {
         case -1://error
-            syslog(LOG_ERR, "Error from fork() in wait_request(): %s", strerror(errno));
-            exit(EXIT_FAILURE);
+	    err_log_exit(LOG_ERR, "Error from fork() in wait_request(): %s", strerror(errno));
             break;
         case 0://hijo
             syslog(LOG_INFO, "Hijo creado correctamente con PID: %d", getpid());
             child( listen );
-        _exit(EXIT_SUCCESS);
+	    _exit(EXIT_SUCCESS);
         default://padre
             wait_request( listen );
         }
-
     }
 }
 
@@ -522,6 +671,8 @@ int main ( int argc, char *argv[] ) {
 
     openlog( NULL, LOG_NOWAIT | LOG_PID, LOG_USER );
 
+    syslog(LOG_NOTICE, "Starting TFTP Server ...");
+
     /* Estructura para manejar a los hijos muertos */
 
     struct sigaction signal_reap_child;
@@ -532,10 +683,8 @@ int main ( int argc, char *argv[] ) {
     signal_reap_child.sa_flags = SA_RESTART;
     signal_reap_child.sa_handler = sigchld_handler;
 
-    if ( sigaction(SIGCHLD, &signal_reap_child, NULL) == -1 ) {
-        syslog(LOG_ERR, "Error from sigaction() in main(): %s", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
+    if ( sigaction(SIGCHLD, &signal_reap_child, NULL) == -1 )
+	err_log_exit(LOG_ERR, "Error from sigaction() in main(): %s",  strerror(errno));
 
     tftp_tl listen;
 
@@ -545,7 +694,7 @@ int main ( int argc, char *argv[] ) {
     listen.descriptor = socket(AF_INET, SOCK_DGRAM, 0);
 
     if ( listen.descriptor == -1 )
-        perror("listen socket");
+	err_log_exit(LOG_ERR, "Error from socket() in main(): %s", strerror(errno));
 
     /* Asignamos datos del socket escucha */
 
@@ -557,8 +706,13 @@ int main ( int argc, char *argv[] ) {
     /* Asociamos el descriptor con el socket que queremos usar */
 
     if ( bind( listen.descriptor, (struct sockaddr *) &listen.addr, sizeof(struct sockaddr_in))  == -1 ) {
-        syslog(LOG_ERR, "Error from bind() in main:() %s", strerror(errno));
-        exit(EXIT_FAILURE);
+  
+	//Probando la nueva función ...
+	
+	err_log_exit(LOG_ERR, "Error from bind() in main(): %s", strerror(errno));
+
+	//syslog(LOG_ERR, "Error from bind() in main:() %s", strerror(errno));
+	//exit(EXIT_FAILURE);
     }
 
     wait_request(&listen);

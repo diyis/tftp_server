@@ -361,7 +361,6 @@ void ack_send( tftp_t * instance ) {
 
     /* Esperamos el siguiente msg */
     while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
-	
         received = recvfrom( instance->local_descriptor,
 			     instance->buf,
 			     MAX_BUFSIZE,
@@ -379,7 +378,8 @@ void ack_send( tftp_t * instance ) {
 	     && ( (instance->buf[0] << 8) + instance->buf[1]  == OPCODE_DATA )
 	     && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum + 1 )
 	     && instance->tid == ntohs(instance->remote_addr.sin_port) ) {
-
+	    retries = 0;
+		
             /* Procesamos los datos recibidos */
             dec_data( instance );
 

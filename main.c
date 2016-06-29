@@ -23,7 +23,7 @@
 
 #define DEF_RETRIES      20
 #define DEF_TIMEOUT_SEC  0
-#define DEF_TIMEOUT_USEC 10000000
+#define DEF_TIMEOUT_USEC 2000000
 #define BUFSIZE          512
 #define MAX_BUFSIZE     (4 + BUFSIZE)
 #define ACK_BUFSIZE      4
@@ -365,9 +365,11 @@ static void ack_send( tftp_t * instance ) {
                              instance->buf,
                              MAX_BUFSIZE,
                              MSG_DONTWAIT,
+			     //0,
                              (struct sockaddr *) &instance->remote_addr,
                              &instance->size_remote );
 
+	//sleep(1);
         /* Verificamos que haya llegado un msg válido, se debe cumplir: */
         /* 1. Que received sea distinto a -1 */
         /* 2. Que el OPCODE sea OPCODE_DATA */
@@ -413,7 +415,7 @@ static void ack_send( tftp_t * instance ) {
                 close( instance->local_descriptor );
 
                 /* */
-
+		
                 syslog(LOG_NOTICE, "Transfer successfull: %s", instance->file );
 
                 /* Hijo finaliza */
@@ -422,7 +424,7 @@ static void ack_send( tftp_t * instance ) {
             }
 
             /* Escribimos en el archivo */
-            offset = write(instance->fd ,instance->msg, BUFSIZE);
+            offset = write(instance->fd ,instance->msg, received - ACK_BUFSIZE);
 
             /* Limpiamos buffer y msg */
             memset( instance->buf, 0, MAX_BUFSIZE);

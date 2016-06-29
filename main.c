@@ -330,29 +330,30 @@ void start_data_send( tftp_t * instance ) {
 }
 
 static void ack_send( tftp_t * instance ) {
+
     static int retries = 0;
     ssize_t  sent,received;
     off_t offset;
 
     if ( retries == DEF_RETRIES )
-	_err_log_exit ( LOG_ERR, "Retries limit reached.");
-	
+        _err_log_exit ( LOG_ERR, "Retries limit reached.");
+
     /* Generamos el ack */
     build_ack_msg( instance );
 
     /* Enviamos el ack */
     sent = sendto( instance->local_descriptor,
-		   instance->buf,
-		   ACK_BUFSIZE,
-		   0,
-		   (struct sockaddr *) &instance->remote_addr,
-		   instance->size_remote);
-    
+                   instance->buf,
+                   ACK_BUFSIZE,
+                   0,
+                   (struct sockaddr *) &instance->remote_addr,
+                   instance->size_remote);
+
     /* Verificamos que se haya enviado correctamente */
-    
-    if ( sent != ACK_BUFSIZE ) 
-	_err_log_exit( LOG_ERR, "Error from sendto() in ack_send(): %s", strerror(errno));
-	
+
+    if ( sent != ACK_BUFSIZE )
+        _err_log_exit( LOG_ERR, "Error from sendto() in ack_send(): %s", strerror(errno));
+
     /* Iniciamos los temporizadores */
 
     gettimeofday( &instance->now, 0 );
@@ -364,11 +365,11 @@ static void ack_send( tftp_t * instance ) {
     /* Esperamos el siguiente msg */
     while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
         received = recvfrom( instance->local_descriptor,
-			     instance->buf,
-			     MAX_BUFSIZE,
-			     MSG_DONTWAIT,
-			     (struct sockaddr *) &instance->remote_addr,
-			     &instance->size_remote );
+                             instance->buf,
+                             MAX_BUFSIZE,
+                             MSG_DONTWAIT,
+                             (struct sockaddr *) &instance->remote_addr,
+                             &instance->size_remote );
 
         /* Verificamos que haya llegado un msg válido, se debe cumplir: */
         /* 1. Que received sea distinto a -1 */
@@ -377,11 +378,11 @@ static void ack_send( tftp_t * instance ) {
         /* 4. Que el msg sea de donde lo esperamos (mismo tid del inicio de la transferencia) */
 
         if ( received != -1
-	     && ( (instance->buf[0] << 8) + instance->buf[1]  == OPCODE_DATA )
-	     && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum + 1 )
-	     && instance->tid == ntohs(instance->remote_addr.sin_port) ) {
-	    retries = 0;
-		
+             && ( (instance->buf[0] << 8) + instance->buf[1]  == OPCODE_DATA )
+             && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum + 1 )
+             && instance->tid == ntohs(instance->remote_addr.sin_port) ) {
+            retries = 0;
+
             /* Procesamos los datos recibidos */
             dec_data( instance );
 
@@ -389,32 +390,32 @@ static void ack_send( tftp_t * instance ) {
             if ( received < MAX_BUFSIZE ) {
 
                 /* Escribimos en el archivo */
-		
-		write( instance->fd, instance->msg, received-4 );
 
-		
+                write( instance->fd, instance->msg, received-4 );
+
+
                 /* Generamos el último ack */
                 instance->blknum++;
                 build_ack_msg( instance );
 
                 /* Enviamos el último msg */
                 sent = sendto( instance->local_descriptor,
-			       instance->buf,
-			       4,
-			       0,
-			       (struct sockaddr *) &instance->remote_addr,
-			       sizeof( struct sockaddr_in ) );
+                               instance->buf,
+                               4,
+                               0,
+                               (struct sockaddr *) &instance->remote_addr,
+                               sizeof( struct sockaddr_in ) );
 
                 /* Verificamos que se haya enviado correctamente */
                 if ( sent != 4 )
-		    _err_log_exit(LOG_ERR, "Error from sendto() in ack_send(): %s", strerror(errno));
-		
+                    _err_log_exit(LOG_ERR, "Error from sendto() in ack_send(): %s", strerror(errno));
+
                 /* Cerramos el descriptor de archivo y de socket */
                 close( instance->fd );
                 close( instance->local_descriptor );
 
                 /* Hijo finaliza */
-		
+
                 _exit(EXIT_SUCCESS);
             }
 
@@ -434,7 +435,8 @@ static void ack_send( tftp_t * instance ) {
     }//end while
     retries++;
     syslog(LOG_NOTICE, "TIMEOUT");
-    ack_send(instance);
+
+
 }
 
 void start_ack_send( tftp_t * instance ) {
@@ -477,8 +479,8 @@ void start_ack_send( tftp_t * instance ) {
     instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC , S_IRWXU | S_IRWXG | S_IRWXO);
 
      /* Seguimos */
-    
-    ack_send( instance );
+    for(;;)
+        ack_send( instance );
 }
 
 void child(tftp_tl * listen ) {
@@ -569,7 +571,7 @@ void child(tftp_tl * listen ) {
         /* Cerramos descriptor de socket */
 
         close( instance->local_descriptor );
-        _exit(EXIT_FAILURE);
+
 
 	_err_log_exit( LOG_ERR, "Transfer mode not supported  ...");
 

@@ -183,13 +183,13 @@ static void data_send( tftp_t * instance ) {
     
     static int retries = 0;
     
-    ssize_t sent,received;
-    off_t offset;
+    static ssize_t sent;
+    static ssize_t received;
+    static off_t offset;
     static bool timeout = false;
-    
-    if ( retries == DEF_RETRIES )
-        _err_log_exit( LOG_ERR, "Retries limit reached.");
 
+    sent = received = offset = 0;
+    
     if ( timeout ) {
         /* Regresamos 512 bytes por tener que reenviar el último msg */
         lseek( instance->fd, -BUFSIZE, SEEK_CUR );
@@ -205,13 +205,14 @@ static void data_send( tftp_t * instance ) {
 
     /* Enviamos el msg */
     sent = sendto( instance->local_descriptor,
-                   instance->buf, 4 + offset ,
-                   0,
+                   instance->buf,
+		   ACK_BUFSIZE + offset ,
+                   MSG_DONTWAIT,
                    (struct sockaddr *) &instance->remote_addr,
-                   sizeof( struct sockaddr_in ) );
+                   instance->size_remote );
 
     /* Verificamos que se haya enviado correctamente */
-    if( sent != 4 + offset )
+    if( sent != ACK_BUFSIZE + offset )
         syslog(LOG_ERR, "Error from sendto() in data_send(): %s", strerror(errno));
 
     /* Iniciamos los temporizadores */
@@ -238,7 +239,7 @@ static void data_send( tftp_t * instance ) {
                 && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum )
                 && ( instance->tid == ntohs( instance->remote_addr.sin_port ) ) ) {
 
-            retries = 0;
+            instance->retries = 0;
 
             /* Si hemos enviado el último msg y recibido el último ack, terminamos */
             if( offset < BUFSIZE ) {
@@ -253,8 +254,7 @@ static void data_send( tftp_t * instance ) {
                 _exit( EXIT_SUCCESS );
             }
 
-            /* Aumentamos blknum y limpiamos los buffers */
-            instance->blknum++;
+            /* Limpiamos los buffers */
             memset( instance->msg, 0, BUFSIZE );
             memset( instance->buf, 0, MAX_BUFSIZE );
 
@@ -263,17 +263,24 @@ static void data_send( tftp_t * instance ) {
             if ( instance->blknum  == 65536 )
                 instance->blknum = 0;
 
+	    /* Aumentamos blknum */
+            instance->blknum++;
             data_send( instance );
         } //end 4-condition if
-
         instance->timer.tv_usec++;
     }//end while
 
     /* Como no hemos recibido el ack correspondiente a la última trama que hemos enviado, ha expirado el tiempo de espera */
 
     timeout = true;
-    retries++;
-    syslog( LOG_NOTICE , "TIMEOUT");
+    instance->retries++;
+
+    
+    if ( instance->retries == DEF_RETRIES )
+        _err_log_exit( LOG_ERR, "Retries limit reached.");
+
+    
+    syslog( LOG_NOTICE, "Retrie number %d in data_send(); blknum %d", instance->retries,instance->blknum);
     data_send( instance );
 }
 

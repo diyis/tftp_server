@@ -54,6 +54,7 @@ typedef struct tftp {
 
     int                  local_descriptor;    /* descriptor de socket local */
     int                  fd;                  /* descriptor de archivo */
+    int                  retries;
     uint16_t             state;               /* estado */
     uint16_t             tid;                 /* id de transferencia */
     uint16_t             err;                 /* tipo de error */
@@ -331,12 +332,8 @@ void start_data_send( tftp_t * instance ) {
 
 static void ack_send( tftp_t * instance ) {
 
-    static int retries = 0;
     ssize_t  sent,received;
     off_t offset;
-
-    if ( retries >= DEF_RETRIES )
-        _err_log_exit( LOG_ERR, "Retries limit reached.");
 
     /* Generamos el ack */
     build_ack_msg( instance );
@@ -381,7 +378,7 @@ static void ack_send( tftp_t * instance ) {
              && ( (instance->buf[0] << 8) + instance->buf[1]  == OPCODE_DATA )
              && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum + 1 )
              && instance->tid == ntohs(instance->remote_addr.sin_port) ) {
-            retries = 0;
+            instance->retries = 0;
 
             /* Procesamos los datos recibidos */
             dec_data( instance );
@@ -391,7 +388,7 @@ static void ack_send( tftp_t * instance ) {
 
                 /* Escribimos en el archivo */
 
-                write( instance->fd, instance->msg, received-4 );
+                write( instance->fd, instance->msg, received - ACK_BUFSIZE );
 
 
                 /* Generamos el último ack */
@@ -401,18 +398,23 @@ static void ack_send( tftp_t * instance ) {
                 /* Enviamos el último msg */
                 sent = sendto( instance->local_descriptor,
                                instance->buf,
-                               4,
+                               ACK_BUFSIZE,
                                0,
                                (struct sockaddr *) &instance->remote_addr,
-                               sizeof( struct sockaddr_in ) );
+                               instance->size_remote );
 
                 /* Verificamos que se haya enviado correctamente */
-                if ( sent != 4 )
+                if ( sent != ACK_BUFSIZE )
                     _err_log_exit(LOG_ERR, "Error from sendto() in ack_send(): %s", strerror(errno));
 
                 /* Cerramos el descriptor de archivo y de socket */
+
                 close( instance->fd );
                 close( instance->local_descriptor );
+
+                /* */
+
+                syslog(LOG_NOTICE, "Transfer successfull: %s", instance->file );
 
                 /* Hijo finaliza */
 
@@ -433,8 +435,12 @@ static void ack_send( tftp_t * instance ) {
         }//end 4-condition if
         instance->timer.tv_usec++;
     }//end while
-    retries++;
-    syslog(LOG_NOTICE, "Retrie number %d in ack_send(); blknum %d",retries,instance->blknum+1);
+    instance->retries++;
+
+    if ( instance->retries == DEF_RETRIES )
+        _err_log_exit( LOG_ERR, "Retries limit reached.");
+
+    syslog(LOG_NOTICE, "Retrie number %d in ack_send(); blknum %d",instance->retries,instance->blknum+1);
 
 
 }

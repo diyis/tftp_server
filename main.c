@@ -180,7 +180,7 @@ void initialize_server( tftp_t * instance ) {
     instance->size_remote = sizeof(struct sockaddr_in);
 }
 
-void data_send( tftp_t * instance ) {
+static void data_send( tftp_t * instance ) {
     
     static int retries = 0;
     
@@ -329,7 +329,7 @@ void start_data_send( tftp_t * instance ) {
     data_send( instance );
 }
 
-void ack_send( tftp_t * instance ) {
+static void ack_send( tftp_t * instance ) {
     static int retries = 0;
     ssize_t  sent,received;
     off_t offset;

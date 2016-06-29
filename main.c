@@ -189,7 +189,7 @@ void data_send( tftp_t * instance ) {
     static bool timeout = false;
     
     if ( retries == DEF_RETRIES )
-	_exit(EXIT_FAILURE);
+	_err_log_exit( LOG_ERR, "Retries limit reached.");
 
     if ( timeout ) {
         /* Regresamos 512 bytes por tener que reenviar el último msg */
@@ -272,6 +272,7 @@ void data_send( tftp_t * instance ) {
 
     timeout = true;
     retries++;
+    syslog( LOG_NOTICE , "TIMEOUT");
     data_send( instance );
 }
 
@@ -319,7 +320,7 @@ void start_data_send( tftp_t * instance ) {
     instance->blknum = 1;
 
     /* Abrimos el descriptor de archivo */
-    instance->fd = open( instance->file, O_RDONLY );
+    instance->fd = open( instance->file, O_RDONLY ,  S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH );
 
     /* Seguimos */
     syslog( LOG_NOTICE, "Sending file ...");
@@ -332,7 +333,7 @@ void ack_send( tftp_t * instance ) {
     off_t offset;
 
     if ( retries == DEF_RETRIES )
-	_exit(EXIT_FAILURE);
+	_err_log_exit ( LOG_ERR, "Retries limit reached.");
 	
     /* Generamos el ack */
     build_ack_msg( instance );
@@ -430,6 +431,7 @@ void ack_send( tftp_t * instance ) {
         instance->timer.tv_usec++;
     }//end while
     retries++;
+    syslog(LOG_NOTICE, "TIMEOUT");
     ack_send(instance);
 }
 
@@ -470,7 +472,7 @@ void start_ack_send( tftp_t * instance ) {
     /* Inicializamos las variables a usar */
     
     instance->blknum = 0;
-    instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC );
+    instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC , S_IRWXU | S_IRWXG | S_IRWXO);
 
      /* Seguimos */
     

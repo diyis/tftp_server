@@ -239,6 +239,8 @@ void data_send( tftp_t * instance ) {
 	    && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum )
 	    && ( instance->tid == ntohs( instance->remote_addr.sin_port ) ) ) {
 
+	    retries = 0;
+
             /* Si hemos enviado el último msg y recibido el último ack, terminamos */
             if( offset < BUFSIZE ) {
 		

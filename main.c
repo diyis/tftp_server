@@ -23,7 +23,7 @@
 
 #define DEF_RETRIES      20
 #define DEF_TIMEOUT_SEC  0
-#define DEF_TIMEOUT_USEC 2000000
+#define DEF_TIMEOUT_USEC 10000000
 #define BUFSIZE          512
 #define MAX_BUFSIZE     (4 + BUFSIZE)
 #define ACK_BUFSIZE      4
@@ -58,7 +58,6 @@ typedef struct tftp {
     uint16_t             state;               /* estado */
     uint16_t             tid;                 /* id de transferencia */
     uint16_t             err;                 /* tipo de error */
-    uint16_t             option;              /* opción de lectura y escritura ???? */
     int32_t              blknum;              /* numero de bloque */
     char                 *msgerr;             /*  msg de error  */
     char                 *mode;               /* modo de transferencia */
@@ -69,7 +68,6 @@ typedef struct tftp {
     struct sockaddr_in   local_addr;               /* estructura local */
     socklen_t            size_remote;         /* tamaño estructura remota */
     socklen_t            size_local;            /* tamaño estructura local */
-    u_char               lastack[MAX_BUFSIZE];  /* arreglo último ack */
     u_char               msg[BUFSIZE];          /* tamaño max msg a enviar */
     u_char               buf[MAX_BUFSIZE];      /* tamaño max msg a recibir */
 
@@ -332,9 +330,11 @@ void start_data_send( tftp_t * instance ) {
 
 static void ack_send( tftp_t * instance ) {
     
-    ssize_t  sent,received;
-    off_t offset;
+    static ssize_t  sent;
+    static ssize_t received;
+    static off_t offset;
 
+    sent = received = offset = 0;
     /* Generamos el ack */
     build_ack_msg( instance );
 
@@ -342,7 +342,7 @@ static void ack_send( tftp_t * instance ) {
     sent = sendto( instance->local_descriptor,
                    instance->buf,
                    ACK_BUFSIZE,
-                   0,
+                   MSG_DONTWAIT,
                    (struct sockaddr *) &instance->remote_addr,
                    instance->size_remote);
 
@@ -365,7 +365,6 @@ static void ack_send( tftp_t * instance ) {
                              instance->buf,
                              MAX_BUFSIZE,
                              MSG_DONTWAIT,
-			     //0,
                              (struct sockaddr *) &instance->remote_addr,
                              &instance->size_remote );
 

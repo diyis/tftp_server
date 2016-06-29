@@ -603,19 +603,16 @@ static void wait_request(tftp_tl * listen) {
 
     memset( listen->buf, 0, MAX_BUFSIZE );
 
-    syslog( LOG_NOTICE, "Listening on default port ... ");
+    //syslog( LOG_NOTICE, "Listening on default port ... ");
     
     received = recvfrom( listen->descriptor,
 			 listen->buf,
 			 MAX_BUFSIZE,
-			 //MSG_DONTWAIT, //Estoy casi seguro de que esto no debería de ser MSG_DONTWAIT, y ninguna de las otras flags del cap 61.3 del libro de Linux me convenció :/
-			 0,
+			 MSG_DONTWAIT, //Estoy casi seguro de que esto no debería de ser MSG_DONTWAIT, y ninguna de las otras flags del cap 61.3 del libro de Linux me convenció :/
+			 //0,
 			 (struct sockaddr *) &listen->remote_addr,
 			 &listen->remote_size );
     
-    if( received == -1)
-	syslog(LOG_ERR, "Error from recvfrom() in wait_request(): %s", strerror(errno));
-
     if( received != -1 ) {
 
         switch ( received = (listen->buf[0] << 8) + listen->buf[1] ) { //Modificaré un poco el received para poder usarlo después ...
@@ -643,10 +640,9 @@ static void wait_request(tftp_tl * listen) {
             syslog(LOG_INFO, "Hijo creado correctamente con PID: %d", getpid());
             child( listen );
 	    _exit(EXIT_SUCCESS);
-        default://padre
-            wait_request( listen );
         }
     }
+    wait_request( listen );
 }
 
 static void sigchld_handler(int sig) {

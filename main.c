@@ -180,9 +180,7 @@ void initialize_server( tftp_t * instance ) {
 }
 
 static void data_send( tftp_t * instance ) {
-    
-    static int retries = 0;
-    
+
     static ssize_t sent;
     static ssize_t received;
     static off_t offset;
@@ -201,26 +199,33 @@ static void data_send( tftp_t * instance ) {
     }else
         offset = read( instance->fd, instance->msg, BUFSIZE );
 
-    build_data_msg( instance ); /* Generamos el msg a enviar */
+    /* Generamos el msg a enviar */
+
+    build_data_msg( instance );
 
     /* Enviamos el msg */
+
     sent = sendto( instance->local_descriptor,
                    instance->buf,
-		   ACK_BUFSIZE + offset ,
+                   ACK_BUFSIZE + offset,
                    MSG_DONTWAIT,
                    (struct sockaddr *) &instance->remote_addr,
                    instance->size_remote );
 
     /* Verificamos que se haya enviado correctamente */
-    if( sent != ACK_BUFSIZE + offset )
+
+    if ( sent != ACK_BUFSIZE + offset )
         syslog(LOG_ERR, "Error from sendto() in data_send(): %s", strerror(errno));
 
     /* Iniciamos los temporizadores */
+
     gettimeofday( &instance->now, 0 );
     gettimeofday( &instance->timer, 0 );
 
     /* Esperamos el siguiente ack */
+
     while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
+
         received = recvfrom( instance->local_descriptor,
                              instance->buf,
                              MAX_BUFSIZE,
@@ -234,7 +239,7 @@ static void data_send( tftp_t * instance ) {
        3. Que el ack corresponda al blknum que esperamos
        4. Que el msg sea de donde lo esperamos (mismo tid del inicio de la transferencia) */
 
-        if( received != -1
+        if ( received != -1
                 && ( (instance->buf[0] << 8) + instance->buf[1] == OPCODE_ACK )
                 && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum )
                 && ( instance->tid == ntohs( instance->remote_addr.sin_port ) ) ) {
@@ -242,30 +247,37 @@ static void data_send( tftp_t * instance ) {
             instance->retries = 0;
 
             /* Si hemos enviado el último msg y recibido el último ack, terminamos */
-            if( offset < BUFSIZE ) {
 
-                syslog( LOG_NOTICE , "File send complete.");
+            if ( offset < BUFSIZE ) {
+
+                syslog( LOG_NOTICE , "File %s send complete.", instance->file );
 
                 /* Cerramos el descriptor de archivo y de socket */
+
                 close( instance->fd );
                 close( instance->local_descriptor );
 
                 /* Hijo finaliza */
+
                 _exit( EXIT_SUCCESS );
             }
 
             /* Limpiamos los buffers */
+
             memset( instance->msg, 0, BUFSIZE );
             memset( instance->buf, 0, MAX_BUFSIZE );
+
+            /* Aumentamos blknum */
+
+            instance->blknum++;
 
             /* Si el blknum es 65536, le asignamos el valor 0 para no salirnos del rango de 2 bytes de la trama para el campo blknum */
 
             if ( instance->blknum  == 65536 )
                 instance->blknum = 0;
 
-	    /* Aumentamos blknum */
-            instance->blknum++;
             data_send( instance );
+
         } //end 4-condition if
         instance->timer.tv_usec++;
     }//end while
@@ -328,10 +340,10 @@ void start_data_send( tftp_t * instance ) {
     instance->blknum = 1;
 
     /* Abrimos el descriptor de archivo */
-    instance->fd = open( instance->file, O_RDONLY ,  S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH );
+    instance->fd = open( instance->file, O_RDONLY );
 
     /* Seguimos */
-    syslog( LOG_NOTICE, "Sending file ...");
+    syslog( LOG_NOTICE, "Sending file %s in start_data_send()", instance->file );
     data_send( instance );
 }
 
@@ -375,7 +387,7 @@ static void ack_send( tftp_t * instance ) {
                              (struct sockaddr *) &instance->remote_addr,
                              &instance->size_remote );
 
-	//sleep(1);
+        //sleep(1);
         /* Verificamos que haya llegado un msg válido, se debe cumplir: */
         /* 1. Que received sea distinto a -1 */
         /* 2. Que el OPCODE sea OPCODE_DATA */
@@ -421,7 +433,7 @@ static void ack_send( tftp_t * instance ) {
                 close( instance->local_descriptor );
 
                 /* */
-		
+
                 syslog(LOG_NOTICE, "Transfer successfull: %s", instance->file );
 
                 /* Hijo finaliza */

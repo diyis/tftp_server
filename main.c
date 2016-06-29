@@ -23,7 +23,7 @@
 
 #define DEF_RETRIES      20
 #define DEF_TIMEOUT_SEC  0
-#define DEF_TIMEOUT_USEC 1000000
+#define DEF_TIMEOUT_USEC 10000000
 #define BUFSIZE          512
 #define MAX_BUFSIZE     (4 + BUFSIZE)
 #define ACK_BUFSIZE      4
@@ -331,7 +331,7 @@ void start_data_send( tftp_t * instance ) {
 }
 
 static void ack_send( tftp_t * instance ) {
-
+    
     ssize_t  sent,received;
     off_t offset;
 
@@ -422,7 +422,7 @@ static void ack_send( tftp_t * instance ) {
             }
 
             /* Escribimos en el archivo */
-            offset = write(instance->fd ,instance->msg, received);
+            offset = write(instance->fd ,instance->msg, BUFSIZE);
 
             /* Limpiamos buffer y msg */
             memset( instance->buf, 0, MAX_BUFSIZE);
@@ -441,7 +441,7 @@ static void ack_send( tftp_t * instance ) {
         _err_log_exit( LOG_ERR, "Retries limit reached.");
 
     syslog(LOG_NOTICE, "Retrie number %d in ack_send(); blknum %d",instance->retries,instance->blknum+1);
-
+    ack_send( instance );
 
 }
 
@@ -485,8 +485,8 @@ void start_ack_send( tftp_t * instance ) {
     instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC , S_IRWXU | S_IRWXG | S_IRWXO);
 
     /* Seguimos */
-    for(;;)
-        ack_send( instance );
+    //for(;;)
+    ack_send( instance );
 }
 
 void child(tftp_tl * listen ) {

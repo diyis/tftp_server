@@ -90,14 +90,12 @@ void err_log_exit( int priority, const char *format, ... ){
 
     va_list args;
 
-    //Redireccionar "..." a vsyslog
-    
     va_start(args, format);
     vsyslog(priority, format, args );
     va_end(args);
 
     syslog(LOG_CRIT, "FATAL ERROR. Shutting down server ...");
-    exit(EXIT_FAILURE);
+    _exit(EXIT_FAILURE);
 }
 
 void _err_log_exit( int priority, const char *format, ... ){
@@ -179,14 +177,13 @@ void initialize_server( tftp_t * instance ) {
     instance->size_remote = sizeof(struct sockaddr_in);
 }
 
-static void data_send( tftp_t * instance ) {
+void data_send( tftp_t * instance ) {
 
-    static ssize_t sent;
-    static ssize_t received;
-    static off_t offset;
+    ssize_t sent;
+    ssize_t received;
+    off_t offset;
     static bool timeout = false;
 
-    sent = received = offset = 0;
     
     if ( timeout ) {
         /* Regresamos 512 bytes por tener que reenviar el último msg */
@@ -250,7 +247,7 @@ static void data_send( tftp_t * instance ) {
 
             if ( offset < BUFSIZE ) {
 
-                syslog( LOG_NOTICE , "File %s send complete.", instance->file );
+                syslog( LOG_NOTICE , "File %s sent successful", instance->file );
 
                 /* Cerramos el descriptor de archivo y de socket */
 
@@ -276,7 +273,7 @@ static void data_send( tftp_t * instance ) {
             if ( instance->blknum  == 65536 )
                 instance->blknum = 0;
 
-            data_send( instance );
+            return;
 
         } //end 4-condition if
         instance->timer.tv_usec++;
@@ -293,7 +290,6 @@ static void data_send( tftp_t * instance ) {
 
     
     syslog( LOG_NOTICE, "Retrie number %d in data_send(); blknum %d", instance->retries,instance->blknum);
-    data_send( instance );
 }
 
 void start_data_send( tftp_t * instance ) {
@@ -344,16 +340,17 @@ void start_data_send( tftp_t * instance ) {
 
     /* Seguimos */
     syslog( LOG_NOTICE, "Sending file %s in start_data_send()", instance->file );
-    data_send( instance );
+    for(;;)
+        data_send( instance );
 }
 
-static void ack_send( tftp_t * instance ) {
+void ack_send( tftp_t * instance ) {
     
-    static ssize_t  sent;
-    static ssize_t received;
-    static off_t offset;
+    ssize_t  sent;
+    ssize_t received;
+    off_t offset;
 
-    sent = received = offset = 0;
+
     /* Generamos el ack */
     build_ack_msg( instance );
 
@@ -434,7 +431,7 @@ static void ack_send( tftp_t * instance ) {
 
                 /* */
 
-                syslog(LOG_NOTICE, "Transfer successfull: %s", instance->file );
+                syslog(LOG_NOTICE, "Transfer successful: %s", instance->file );
 
                 /* Hijo finaliza */
 
@@ -450,7 +447,7 @@ static void ack_send( tftp_t * instance ) {
 
             /* Incrementamos blknum */
             instance->blknum++;
-            ack_send(instance);
+            return;
 
         }//end 4-condition if
         instance->timer.tv_usec++;
@@ -461,8 +458,6 @@ static void ack_send( tftp_t * instance ) {
         _err_log_exit( LOG_ERR, "Retries limit reached.");
 
     syslog(LOG_NOTICE, "Retrie number %d in ack_send(); blknum %d",instance->retries,instance->blknum+1);
-    ack_send( instance );
-
 }
 
 void start_ack_send( tftp_t * instance ) {
@@ -505,8 +500,8 @@ void start_ack_send( tftp_t * instance ) {
     instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC , S_IRWXU | S_IRWXG | S_IRWXO);
 
     /* Seguimos */
-    //for(;;)
-    ack_send( instance );
+    for(;;)
+        ack_send( instance );
 }
 
 void child(tftp_tl * listen ) {
@@ -604,7 +599,7 @@ void child(tftp_tl * listen ) {
     }
 }
 
-static void wait_request(tftp_tl * listen) {
+void wait_request(tftp_tl * listen) {
 
     ssize_t received;
     pid_t childPid;

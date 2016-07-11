@@ -64,6 +64,7 @@ typedef struct tftp {
     char                 *file;               /* nombre del archivo */
     struct timeval       now;                 /* temporizador inicial */
     struct timeval       timer;               /* temporizador final */
+    struct timeval       timeout;
     struct sockaddr_in   remote_addr;              /* estructura remota */
     struct sockaddr_in   local_addr;               /* estructura local */
     socklen_t            size_remote;         /* tamaño estructura remota */
@@ -205,7 +206,7 @@ void data_send( tftp_t * instance ) {
     sent = sendto( instance->local_descriptor,
                    instance->buf,
                    ACK_BUFSIZE + offset,
-                   MSG_DONTWAIT,
+                   0,
                    (struct sockaddr *) &instance->remote_addr,
                    instance->size_remote );
 
@@ -216,17 +217,18 @@ void data_send( tftp_t * instance ) {
 
     /* Iniciamos los temporizadores */
 
-    gettimeofday( &instance->now, 0 );
-    gettimeofday( &instance->timer, 0 );
+    //gettimeofday( &instance->now, 0 );
+    //gettimeofday( &instance->timer, 0 );
+
 
     /* Esperamos el siguiente ack */
 
-    while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
+//    while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
 
         received = recvfrom( instance->local_descriptor,
                              instance->buf,
                              MAX_BUFSIZE,
-                             MSG_DONTWAIT,
+                             0,
                              (struct sockaddr *) &instance->remote_addr,
                              &instance->size_remote );
 
@@ -237,9 +239,10 @@ void data_send( tftp_t * instance ) {
        4. Que el msg sea de donde lo esperamos (mismo tid del inicio de la transferencia) */
 
         if ( received != -1
-                && ( (instance->buf[0] << 8) + instance->buf[1] == OPCODE_ACK )
-                && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum )
-                && ( instance->tid == ntohs( instance->remote_addr.sin_port ) ) ) {
+             && received != EWOULDBLOCK
+             && ( (instance->buf[0] << 8) + instance->buf[1] == OPCODE_ACK )
+             && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum )
+             && ( instance->tid == ntohs( instance->remote_addr.sin_port ) ) ) {
 
             instance->retries = 0;
 
@@ -276,8 +279,8 @@ void data_send( tftp_t * instance ) {
             return;
 
         } //end 4-condition if
-        instance->timer.tv_usec++;
-    }//end while
+        //instance->timer.tv_usec++;
+//    }//end while
 
     /* Como no hemos recibido el ack correspondiente a la última trama que hemos enviado, ha expirado el tiempo de espera */
 
@@ -338,6 +341,13 @@ void start_data_send( tftp_t * instance ) {
     /* Abrimos el descriptor de archivo */
     instance->fd = open( instance->file, O_RDONLY );
 
+    /* Iniciamos el temporizador */
+    instance->timeout.tv_sec = 1;
+    instance->timeout.tv_usec = 0;
+
+    if ( setsockopt( instance->local_descriptor, SOL_SOCKET, SO_RCVTIMEO, (char *)&instance->timeout, sizeof(instance->timeout)) < 0 )
+        _err_log_exit( LOG_ERR, "Error setsockopt() in data_send().");
+
     /* Seguimos */
     syslog( LOG_NOTICE, "Sending file %s in start_data_send()", instance->file );
     for(;;)
@@ -358,7 +368,7 @@ void ack_send( tftp_t * instance ) {
     sent = sendto( instance->local_descriptor,
                    instance->buf,
                    ACK_BUFSIZE,
-                   MSG_DONTWAIT,
+                   0,
                    (struct sockaddr *) &instance->remote_addr,
                    instance->size_remote);
 
@@ -369,22 +379,21 @@ void ack_send( tftp_t * instance ) {
 
     /* Iniciamos los temporizadores */
 
-    gettimeofday( &instance->now, 0 );
-    gettimeofday( &instance->timer, 0 );
+    //gettimeofday( &instance->now, 0 );
+    //gettimeofday( &instance->timer, 0 );
 
     /* Asignamos -1 a blknum en caso de ser 65535 para evitar un rango incorrecto en los ack */
     if ( instance->blknum == 65535 ) instance->blknum = -1;
 
     /* Esperamos el siguiente msg */
-    while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
+    //while ( instance->timer.tv_usec - instance->now.tv_usec < DEF_TIMEOUT_USEC ) {
         received = recvfrom( instance->local_descriptor,
                              instance->buf,
                              MAX_BUFSIZE,
-                             MSG_DONTWAIT,
+                             0,
                              (struct sockaddr *) &instance->remote_addr,
                              &instance->size_remote );
 
-        //sleep(1);
         /* Verificamos que haya llegado un msg válido, se debe cumplir: */
         /* 1. Que received sea distinto a -1 */
         /* 2. Que el OPCODE sea OPCODE_DATA */
@@ -392,6 +401,7 @@ void ack_send( tftp_t * instance ) {
         /* 4. Que el msg sea de donde lo esperamos (mismo tid del inicio de la transferencia) */
 
         if ( received != -1
+             && received != EWOULDBLOCK
              && ( (instance->buf[0] << 8) + instance->buf[1]  == OPCODE_DATA )
              && ( (instance->buf[2] << 8) + instance->buf[3]  == instance->blknum + 1 )
              && instance->tid == ntohs(instance->remote_addr.sin_port) ) {
@@ -450,9 +460,9 @@ void ack_send( tftp_t * instance ) {
             return;
 
         }//end 4-condition if
-        instance->timer.tv_usec++;
-    }//end while
-    instance->retries++;
+        //instance->timer.tv_usec++;
+   // }//end while
+    //instance->retries++;
 
     if ( instance->retries == DEF_RETRIES )
         _err_log_exit( LOG_ERR, "Retries limit reached.");
@@ -498,6 +508,13 @@ void start_ack_send( tftp_t * instance ) {
     
     instance->blknum = 0;
     instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC , S_IRWXU | S_IRWXG | S_IRWXO);
+
+    /* Iniciamos el temporizador */
+    instance->timeout.tv_sec = 1;
+    instance->timeout.tv_usec = 0;
+
+    if ( setsockopt( instance->local_descriptor, SOL_SOCKET, SO_RCVTIMEO, (char *)&instance->timeout, sizeof(instance->timeout)) < 0 )
+        _err_log_exit( LOG_ERR, "Error setsockopt() in data_send().");
 
     /* Seguimos */
     for(;;)

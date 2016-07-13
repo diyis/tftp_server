@@ -22,8 +22,8 @@
 #define OPCODE_ERROR    5
 
 #define DEF_RETRIES      20
-#define DEF_TIMEOUT_SEC  0
-#define DEF_TIMEOUT_USEC 10000000
+#define DEF_TIMEOUT_SEC  1
+#define DEF_TIMEOUT_USEC 0
 #define BUFSIZE          512
 #define MAX_BUFSIZE     (4 + BUFSIZE)
 #define ACK_BUFSIZE      4
@@ -342,8 +342,8 @@ void start_data_send( tftp_t * instance ) {
     instance->fd = open( instance->file, O_RDONLY );
 
     /* Iniciamos el temporizador */
-    instance->timeout.tv_sec = 1;
-    instance->timeout.tv_usec = 0;
+    instance->timeout.tv_sec = DEF_TIMEOUT_SEC;
+    instance->timeout.tv_usec = DEF_TIMEOUT_USEC;
 
     if ( setsockopt( instance->local_descriptor, SOL_SOCKET, SO_RCVTIMEO, (char *)&instance->timeout, sizeof(instance->timeout)) < 0 )
         _err_log_exit( LOG_ERR, "Error setsockopt() in data_send().");
@@ -462,7 +462,7 @@ void ack_send( tftp_t * instance ) {
         }//end 4-condition if
         //instance->timer.tv_usec++;
    // }//end while
-    //instance->retries++;
+    instance->retries++;
 
     if ( instance->retries == DEF_RETRIES )
         _err_log_exit( LOG_ERR, "Retries limit reached.");
@@ -510,8 +510,8 @@ void start_ack_send( tftp_t * instance ) {
     instance->fd = open( instance->file, O_WRONLY | O_CREAT | O_TRUNC , S_IRWXU | S_IRWXG | S_IRWXO);
 
     /* Iniciamos el temporizador */
-    instance->timeout.tv_sec = 1;
-    instance->timeout.tv_usec = 0;
+    instance->timeout.tv_sec = DEF_TIMEOUT_SEC;
+    instance->timeout.tv_usec = DEF_TIMEOUT_USEC;
 
     if ( setsockopt( instance->local_descriptor, SOL_SOCKET, SO_RCVTIMEO, (char *)&instance->timeout, sizeof(instance->timeout)) < 0 )
         _err_log_exit( LOG_ERR, "Error setsockopt() in data_send().");
@@ -633,7 +633,7 @@ void wait_request(tftp_tl * listen) {
                          &listen->remote_size );
     
     if( received != -1 ) {
-
+	
         switch ( received = (listen->buf[0] << 8) + listen->buf[1] ) {
         case OPCODE_RRQ:
             syslog( LOG_NOTICE, "Received Read Request.");

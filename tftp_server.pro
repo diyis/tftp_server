@@ -4,8 +4,7 @@ CONFIG -= app_bundle
 CONFIG -= qt
 
 SOURCES += main.c \
-    tftp.c \
-    client.c
+    tftp.c
 
 HEADERS += \
     tftp.h

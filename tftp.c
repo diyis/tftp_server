@@ -1,6 +1,6 @@
 #include "tftp.h"
 
-void err_log_exit( int priority, const char *format, ... ){
+void err_log_exit( int priority, const char *format, ... ) {
 
     va_list args;
 
@@ -12,7 +12,7 @@ void err_log_exit( int priority, const char *format, ... ){
     _exit(EXIT_FAILURE);
 }
 
-void _err_log_exit( int priority, const char *format, ... ){
+void _err_log_exit( int priority, const char *format, ... ) {
 
     va_list args;
     
@@ -49,7 +49,7 @@ void build_error( tftp_t * instance) {
 
 }
 
-void build_ack_msg( tftp_t * instance ) {
+void build_ack_msg( tftp_t * instance )  {
 
     u_char *p;
     memset( instance->buf, 0, MAX_BUFSIZE );

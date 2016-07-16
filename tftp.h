@@ -1,15 +1,15 @@
 #ifndef TFTP_H
 #define TFTP_H
 
-#include <unistd.h>     //llamadas al sistema
 #include <sys/types.h>  //tipos de dato *_t para el Sistema Operativo
+#include <syslog.h>     //log del sistema
+#include <unistd.h>     //llamadas al sistema
 #include <fcntl.h>      //constantes tipo O_*
 #include <sys/stat.h>   //información sobre atributos de archivos
 #include <sys/time.h>   //funciones de tiempo
 #include <sys/socket.h> //socket
 #include <arpa/inet.h>  //funciones usadas para internet
 #include <signal.h>     //señales
-#include <syslog.h>     //log del sistema
 #include <sys/wait.h>   //
 #include <errno.h>
 #include <string.h>
@@ -57,25 +57,22 @@
 
 typedef struct tftp {
 
-    int                  local_descriptor;    /* descriptor de socket local */
-    int                  fd;                  /* descriptor de archivo */
-    int                  retries;
-    uint16_t             state;               /* estado */
-    uint16_t             tid;                 /* id de transferencia */
-    uint16_t             err;                 /* tipo de error */
-    int32_t              blknum;              /* numero de bloque */
-    char                 *msgerr;             /*  msg de error  */
-    char                 *mode;               /* modo de transferencia */
-    char                 *file;               /* nombre del archivo */
-    struct timeval       now;                 /* temporizador inicial */
-    struct timeval       timer;               /* temporizador final */
-    struct timeval       timeout;
-    struct sockaddr_in   remote_addr;         /* estructura remota */
-    struct sockaddr_in   local_addr;          /* estructura local */
-    socklen_t            size_remote;         /* tamaño estructura remota */
-    socklen_t            size_local;          /* tamaño estructura local */
-    u_char               msg[BUFSIZE];        /* tamaño max msg a enviar */
-    u_char               buf[MAX_BUFSIZE];    /* tamaño max msg a recibir */
+    int                             local_descriptor;      /* descriptor de socket local */
+    int                             fd;                            /* descriptor de archivo */
+    int                             retries;
+    uint16_t                    state;                     /* estado */
+    uint16_t                    tid;                 /* id de transferencia */
+    uint16_t                    err;                 /* tipo de error */
+    int32_t                     blknum;                             /* numero de bloque */
+    char                        *msgerr;                         /*  msg de error  */
+    char                        *mode;               /* modo de transferencia */
+    char                        *file;               /* nombre del archivo */
+    struct sockaddr_in   remote_addr;               /* estructura remota */
+    struct sockaddr_in   local_addr;                    /* estructura local */
+    socklen_t                 size_remote;                /* tamaño estructura remota */
+    socklen_t                 size_local;                   /* tamaño estructura local */
+    u_char                      msg[BUFSIZE];               /* tamaño max msg a enviar */
+    u_char                      buf[MAX_BUFSIZE];        /* tamaño max msg a recibir */
 
 } tftp_t;
 

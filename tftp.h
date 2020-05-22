@@ -26,10 +26,11 @@
 
 #define DEF_RETRIES 20
 #define DEF_TIMEOUT_SEC 1
-#define DEF_TIMEOUT_USEC 0
+#define DEF_TIMEOUT_USEC 500
 #define BUFSIZE 512
 #define MAX_BUFSIZE ( 4 + BUFSIZE )
 #define ACK_BUFSIZE 4
+#define NAMESIZE 255
 
 #define MODE_OCTET "octet"
 #define MODE_NETASCII "netascii"
@@ -56,35 +57,35 @@
 #define DEFAULT_SERVER_PORT 69
 
 typedef struct tftp {
-  int                local_descriptor; /* descriptor de socket local */
-  int                fd;               /* descriptor de archivo */
-  int                retries;          /* reintentos */
-  uint16_t           state;            /* estado */
-  uint16_t           tid;              /* id de transferencia */
-  uint16_t           err;              /* tipo de error */
-  int32_t            blknum;           /* numero de bloque */
-  char *             msgerr;           /*  msg de error  */
-  char *             mode;             /* modo de transferencia */
-  char *             file;             /* nombre del archivo */
-  struct sockaddr_in remote_addr;      /* estructura remota */
-  struct sockaddr_in local_addr;       /* estructura local */
-  struct timeval     timeout;          /* tiempo de espera para cada msg */
-  socklen_t          size_remote;      /* tamaño estructura remota */
-  socklen_t          size_local;       /* tamaño estructura local */
-  u_char             msg[BUFSIZE];     /* tamaño max msg a enviar */
-  u_char             buf[MAX_BUFSIZE]; /* tamaño max msg a recibir */
+    int                local_descriptor; /* descriptor de socket local */
+    int                fd;               /* descriptor de archivo */
+    int                retries;          /* reintentos */
+    uint16_t           state;            /* estado */
+    uint16_t           tid;              /* id de transferencia */
+    uint16_t           err;              /* tipo de error */
+    int32_t            blknum;           /* numero de bloque */
+    char *             msgerr;           /*  msg de error  */
+    char *             mode;             /* modo de transferencia */
+    char               file[NAMESIZE];   /* nombre del archivo */
+    struct sockaddr_in remote_addr;      /* estructura remota */
+    struct sockaddr_in local_addr;       /* estructura local */
+    struct timeval     timeout;          /* tiempo de espera para cada msg */
+    socklen_t          size_remote;      /* tamaño estructura remota */
+    socklen_t          size_local;       /* tamaño estructura local */
+    u_char             msg[BUFSIZE];     /* tamaño max msg a enviar */
+    u_char             buf[MAX_BUFSIZE]; /* tamaño max msg a recibir */
 
 } tftp_t;
 
 typedef struct tftp_listen {
-  int                descriptor;       /* descriptor de socket escucha */
-  uint16_t           state;            /* estado */
-  char *             mode;             /* modo de transferencia */
-  struct sockaddr_in addr;             /* estructura escucha */
-  struct sockaddr_in remote_addr;      /* estructura remota */
-  socklen_t          size;             /* tamaño estructura escucha */
-  socklen_t          remote_size;      /* tamaño estructura escucha */
-  u_char             buf[MAX_BUFSIZE]; /* tamaño max msg a recibir */
+    int                descriptor;       /* descriptor de socket escucha */
+    uint16_t           state;            /* estado */
+    char *             mode;             /* modo de transferencia */
+    struct sockaddr_in addr;             /* estructura escucha */
+    struct sockaddr_in remote_addr;      /* estructura remota */
+    socklen_t          size;             /* tamaño estructura escucha */
+    socklen_t          remote_size;      /* tamaño estructura escucha */
+    u_char             buf[MAX_BUFSIZE]; /* tamaño max msg a recibir */
 
 } tftp_tl;
 
@@ -96,14 +97,12 @@ void build_data_msg ( tftp_t *instance );
 
 void build_error ( tftp_t *instance );
 
-//void build_ack_msg ( tftp_t *instance );
-void build_ack_msg ( u_char *buf, int blknum );
+void build_ack_msg ( tftp_t *instance );
 
 void dec_data ( tftp_t *instance );
 
 void data_send ( tftp_t *instance );
 
 void ack_send ( tftp_t *instance );
-
 
 #endif
